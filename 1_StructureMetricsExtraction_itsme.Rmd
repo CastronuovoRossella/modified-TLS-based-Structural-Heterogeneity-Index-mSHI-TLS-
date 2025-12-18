@@ -1,0 +1,383 @@
+---
+title: "Structure diversity assessment"
+author: "Rossella Castronuovo"
+date: "2025-06-18"
+modified: "27/10/2025"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    code_folding: hide
+---
+
+# Beyond plot-level analysis: a tree-scale TLS-QSM index reveals management-driven
+
+The aims of this study are to:
+
+(i) quantify structural attributes of different forest stands in Southern Italy using TLS- and QSM-derived metrics, capturing variation associated with species composition and management intensity;
+
+(ii) develop a modified Structural Heterogeneity Index (mSHI-TLS) that disentangles independent sources of structural variability across major tree domains;
+
+(iii) compare the proposed index with the existing SHI-TLS to evaluate its descriptive and diagnostic capacity in characterizing forest structural heterogeneity.
+
+## 1. Analysis preparation
+
+Quantify structural attributes of different forest stands using TLS- and QSM-derived metrics,
+
+```{r}
+# Load libraries
+library(ITSMe)
+library(tools) 
+library(tidyverse)
+library(readxl)
+library(plyr)
+library(ggplot2)
+library(reshape2)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(tibble)
+```
+
+## 1.1 Input data
+
+A dedicated directory was used to store point-cloud files (.txt) and three-dimensional model files (.mat) of individual trees according to its plot of origin.
+
+```{r eval=FALSE}
+# Pointcloud data
+Qc_Cp_files <- list.files("E:/DELL/Lidar structure index/Stat/QC_CP/pointcloud", 
+               pattern = "\\.txt$", 
+               full.names = TRUE)
+
+Qc_Tr_files <- list.files("E:/DELL/Lidar structure index/Stat/QC_TR/pointcloud", 
+               pattern = "\\.txt$", 
+               full.names = TRUE)
+
+Pm_R_files <- list.files("E:/DELL/Lidar structure index/Stat/PM_R/pointcloud", 
+              pattern = "\\.txt$", 
+              full.names = TRUE)
+
+Fs_Hf_files <- list.files("E:/DELL/Lidar structure index/Stat/FS_HF/pointcloud",
+              pattern = "\\.txt$", 
+              full.names = TRUE)
+
+# Matfiles
+
+Qc_Cp_mat <- list.files("E:/DELL/Lidar structure index/Stat/QC_CP/opt_1mod/", 
+             pattern = "*.mat", 
+             full.names = TRUE)
+
+Qc_Tr_mat <- list.files("E:/DELL/Lidar structure index/Stat/QC_TR/opt_1mod/", 
+             pattern = "*.mat", 
+             full.names = TRUE)
+
+Pm_R_mat <-  list.files("E:/DELL/Lidar structure index/Stat/PM_R/opt_1mod/", 
+             pattern = "*.mat", 
+             full.names = TRUE)
+
+Fs_Hf_mat <- list.files("E:/DELL/Lidar structure index/Stat/FS_HF/opt_1mod/", 
+            pattern = "*.mat", 
+            full.names = TRUE)
+
+```
+
+## 1.2 Output data
+
+```{r eval=FALSE}
+output <- "E:/DELL/Lidar structure index/Stat" 
+```
+
+## 1.3 Process point cloud for structure analysis
+
+Loop function applied on each data collection to process 3D tree point clouds to extract key structural metrics.
+
+For each file, reads the point cloud and computes tree metrics
+
+```{r eval=FALSE}
+
+#Loop to extract key structural metrics
+process_point_clouds <- function(files, source_label) {
+                                 results_list <- list()
+  
+  for (file_path in files) {
+    tryCatch({
+      tree_pc <- read_tree_pc(path = file_path)
+      
+      
+#Assess structure parameters
+     D_out <- diameter_slice_pc(pc = tree_pc, 
+                                slice_height = 1.3, 
+                                slice_thickness = 0.06, 
+                                functional = TRUE)
+                                DBH <- D_out$diameter
+      
+      Dab_out <- dab_pc(pc = tree_pc, 
+                        functional = TRUE)
+                        DAB <- Dab_out$dab 
+      
+      H_out <- tree_height_pc(pc = tree_pc) 
+               H <- H_out$h 
+               
+      slice_dbh <- tree_pc[tree_pc[,3] >= 1.27 & tree_pc[,3] <= 1.33, ]
+                   out <- projected_area_pc(pc = slice_dbh, 
+                                            plot = FALSE)
+
+                    BA <- out$pa
+                    DBH2 <- 2 * sqrt(BA / pi)
+                    DBH2 <- DBH2 * 100
+         
+             
+      C_out <- classify_crown_pc(pc = tree_pc)
+               crown_ins <- C_out$crownpoints
+               
+               crown_base_height <- ifelse(nrow(crown_ins) > 0, 
+                                           min(crown_ins[, 3]), NA)
+               
+               crown_length <- H - crown_base_height
+               
+               crown_pojected_area <- projected_area_pc(pc = crown_ins)
+                                      crown_pa <- crown_pojected_area$pa
+               
+               crown_alfa_volume <- alpha_volume_pc(pc = crown_ins)
+                                    crown_volume <- crown_alfa_volume$av
+                        
+                                       
+#Prepare dataset to store results
+      results_list[[length(results_list) + 1]] <- data.frame(
+      file_name = basename(file_path),
+      source = source_label,
+      DBH = DBH,
+      DAB = DAB,
+      H = H,
+      BA = BA,
+      DBH2 =DBH2,
+      crown_base_height = crown_base_height,
+      crown_length = crown_length,
+      crown_pa = crown_pa,
+      crown_volume = crown_volume 
+    
+      )
+    }, error = function(e) {
+      message("Error in file: ", basename(file_path), "\n", e)
+    })
+  }
+
+                                 
+#Combine results
+  result_df <- do.call(rbind, 
+                       results_list)
+  return(result_df)
+}
+
+
+#loop applied on each  data collection 
+Qc_Cp_cloud <- process_point_clouds(Qc_Cp_files, "Qc_Cp")
+Qc_Tr_cloud <- process_point_clouds(Qc_Tr_files, "Qc_Tr")
+Pm_R_cloud <- process_point_clouds(Pm_R_files, "Pm_R")
+Fs_Hf_cloud <- process_point_clouds(Fs_Hf_files, "Fs_Hf")
+
+```
+
+## 1.3.1 Plot some examples
+
+```{r eval=FALSE}
+
+#Load the example tree
+Treeexample <- read_tree_pc(path = "E:/DELL/Lidar structure index/Stat/plots/Figure2/Treeexample.txt")
+
+#DBH 
+  #pdf(file.path(output, "Treeexample_DBH.pdf"), width = 7, height = 6)
+  D_out <- diameter_slice_pc(
+  pc = Treeexample,
+  slice_height   = 1.3,
+  slice_thickness = 0.06,
+  plot = TRUE,
+  functional = TRUE)
+  #dev.off()
+
+#H
+  #pdf(file.path(output, "Treeexample_H.pdf"), width = 7, height = 6)
+  H_out <- tree_height_pc(pc = Treeexample, plot = TRUE)
+  H <- H_out$h
+
+#CROWN
+  #pdf(file.path(output, "Treeexample_Crown.pdf"), width = 7, height = 6)
+  C_out <- classify_crown_pc(pc = Treeexample, plot = TRUE)
+  crown_pc <- C_out$crownpoints
+
+#PJA
+  #pdf(file.path(output, "Treeexample_crown.pdf"), width = 7, height = 6)
+  out_crown_pa <- projected_area_pc(pc = crown_pc, plot = TRUE)
+  
+  #pdf(file.path(output, "Treeexample_PJA.pdf"), width = 7, height = 6)
+  Crown_PA <- out_crown_pa$pa
+
+```
+
+## 1.4 Process Model data files
+
+Loop function applied on each data collection to process 3D Quantitative Structure Model (QSM) data to extract detailed tree and branch information. For each file, it reads the QSM object and converts either the tree-data or branch components into data frames. Each entry is labeled with the corresponding file name for traceability. The resulting datasets are then combined across all files to create unified data frames for both tree-level and branch-level metrics.
+
+```{r eval=FALSE}
+
+#Function to process QSMs
+process_mat_data <- function(files) {
+                  
+  TRdata <- lapply(files, 
+                   function(f) {
+                                qsm <- read_tree_qsm(f, version = "2.0")
+                                df <- as.data.frame(qsm$treedata)
+                                df$file_name <- basename(f)  
+                   return(df)
+                                })
+  
+
+            TRdata_df <- do.call(rbind, TRdata)
+                   return(TRdata_df)
+                               }
+
+
+process_mat_BRdata <- function(files) {
+  
+    BRdata  <- lapply(files, 
+                      function(f) {
+                                 qsm <- read_tree_qsm(f, version = "2.0")
+                                 df <- as.data.frame(qsm$branch)
+                                 df$FileName <- basename(f) 
+                      return(df)
+                                  })
+  
+  BRdata_metrics_df <- do.call(rbind, BRdata)
+  return(BRdata_metrics_df)
+                                     }
+
+#Process treedata and branch data
+Qc_Cp_treedata <- process_mat_data(Qc_Cp_mat)
+Qc_Tr_treedata <- process_mat_data(Qc_Tr_mat)
+Pm_R_treedata <- process_mat_data(Pm_R_mat)
+Fs_Hf_treedata <- process_mat_data(Fs_Hf_mat)
+
+Qc_Cp_branch <- process_mat_BRdata(Qc_Cp_mat)
+Qc_Tr_branch <- process_mat_BRdata(Qc_Tr_mat)
+Pm_R_branch <- process_mat_BRdata(Pm_R_mat)
+Fs_Hf_branch <- process_mat_BRdata(Fs_Hf_mat)
+
+```
+
+## 1.5 Arrange data
+
+````{r eval=FALSE}
+
+#Remove specified columns from treedata
+clean_treedata <- function(treedata_df) {
+  treedata_clean <- treedata_df %>%
+    select(-TotalLength, 
+           -TrunkArea, 
+           -BranchArea, 
+           -DBHcyl, 
+           -CrownDiamAve,
+           -CrownRatio, 
+           -CrownDiamMax, 
+           -CrownAreaConv,
+           -CrownAreaAlpha,
+           -CrownBaseHeight,
+           -CrownLength,
+           -CrownVolumeConv,
+           -CrownVolumeAlpha,
+           -location, 
+           -StemTaper, -VerticalProfile, -spreads,
+           -VolCylDia, -AreCylDia, -LenCylDia, 
+           -VolCylHei, -AreCylHei, -LenCylHei, 
+           -VolCylZen, -AreCylZen, -LenCylZen, 
+           -VolCylAzi, -AreCylAzi, -LenCylAzi, 
+           -VolBranchOrd, -AreBranchOrd, -LenBranchOrd,
+           -NumBranchOrd, -VolBranchDia, -VolBranch1Dia, 
+           -AreBranchDia, -AreBranch1Dia, -LenBranchDia, 
+           -LenBranch1Dia, -NumBranchDia, -NumBranch1Dia, 
+           -VolBranchHei, -VolBranch1Hei, -AreBranchHei,
+           -AreBranch1Hei, -LenBranchHei, -LenBranch1Hei, 
+           -NumBranchHei, -NumBranch1Hei, -VolBranchAng, 
+           -VolBranch1Ang, -AreBranchAng, -AreBranch1Ang, 
+           -LenBranchAng, -LenBranch1Ang, -NumBranchAng, 
+           -NumBranch1Ang, -VolBranchAzi, -VolBranch1Azi, 
+           -AreBranchAzi, -AreBranch1Azi, -LenBranchAzi,
+           -LenBranch1Azi, -NumBranchAzi, -NumBranch1Azi, 
+           -VolBranchZen, -VolBranch1Zen, -AreBranchZen, 
+           -AreBranch1Zen, -LenBranchZen, -LenBranch1Zen,
+           -NumBranchZen, -NumBranch1Zen )}
+
+#Remove specified columns from branchdata
+clean_branchdata <- function(branch_df) {
+  branch_clean <- branch_df %>%
+    select(-diameter, -area, -height, -azimuth, -zenith)
+  return(branch_clean)
+}
+
+#Apply
+Qc_Cp_treedata_clean <- clean_treedata(Qc_Cp_treedata)
+Qc_Tr_treedata_clean <- clean_treedata(Qc_Tr_treedata)
+Qc_Cp_branch_clean <- clean_branchdata(Qc_Cp_branch)
+Qc_Tr_branch_clean <- clean_branchdata(Qc_Tr_branch)
+Fs_Hf_treedata_clean <- clean_treedata(Fs_Hf_treedata)
+Fs_Hf_branch_clean <- clean_branchdata(Fs_Hf_branch)
+Pm_R_treedata_clean <- clean_treedata(Pm_R_treedata)
+Pm_R_branch_clean <- clean_branchdata(Pm_R_branch)
+
+```
+
+
+```{r eval=FALSE}
+##Save
+
+
+write.csv(Qc_Cp_cloud, 
+          file = file.path(output, "Qc_Cp_cloud.csv"), 
+          row.names = FALSE)
+
+write.csv(Qc_Tr_cloud, 
+          file = file.path(output, "Qc_Tr_cloud.csv"), 
+          row.names = FALSE)
+
+write.csv(Pm_R_cloud, 
+          file = file.path(output, "Pm_R_cloud.csv"), 
+          row.names = FALSE)
+
+write.csv(Fs_Hf_cloud, 
+          file = file.path(output, "Fs_Hf_cloud.csv"), 
+          row.names = FALSE)
+
+#Export clean data
+
+write.csv(Qc_Cp_treedata_clean, 
+          file = file.path(output, "Qc_Cp_treedata.csv"), 
+          row.names = FALSE)
+
+write.csv(Qc_Cp_branch_clean, 
+          file = file.path(output, "Qc_Cp_branch.csv"), 
+          row.names = FALSE)
+
+write.csv(Qc_Tr_treedata_clean, 
+          file = file.path(output, "Qc_Tr_treedata_clean.csv"), 
+          row.names = FALSE)
+
+write.csv(Qc_Tr_branch_clean, 
+          file = file.path(output, "Qc_Tr_branch_clean.csv"), 
+          row.names = FALSE)
+
+write.csv(Fs_Hf_treedata_clean, 
+          file = file.path(output, "Fs_Hf_treedata_clean.csv"), 
+          row.names = FALSE)
+
+write.csv(Fs_Hf_branch_clean, 
+          file = file.path(output, "Fs_Hf_branch_clean.csv"), 
+          row.names = FALSE)
+
+write.csv(Pm_R_treedata_clean, 
+          file = file.path(output, "Pm_R_treedata_clean.csv"), 
+          row.names = FALSE)
+
+write.csv(Pm_R_branch_clean, 
+          file = file.path(output, "Pm_R_branch_clean.csv"), 
+          row.names = FALSE)
+
+```
