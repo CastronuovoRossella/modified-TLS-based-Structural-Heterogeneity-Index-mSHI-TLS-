@@ -549,7 +549,7 @@ output_summary <- file.path(output, "01_descriptives")
 readr::write_csv(branch_summary_table,
                  file.path(output_summary, "BranchSector_SUMMARY.csv"))
 
-# stampa anteprima
+# print
 print(head(branch_summary_table, 20))
 
 
@@ -630,4 +630,5 @@ canopy_vars <- unique(DESC_ALL_Canopy$Variable)
 invisible(lapply(canopy_vars, plot_canopy_variable))
 
 ```
+
 
