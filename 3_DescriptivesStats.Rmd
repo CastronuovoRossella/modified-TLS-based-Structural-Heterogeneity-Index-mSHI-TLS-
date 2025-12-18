@@ -1,0 +1,633 @@
+---
+title: "Untitled"
+author: "Rossella Castronuovo"
+date: "2025-10-14"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+---
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Load Libraries
+library(tidyverse)   
+library(psych)
+library(robustbase)
+library(readxl)     
+library(tools)
+library(dplyr)
+library(stringr)
+library(rlang)
+
+```
+
+## 1. Analysis preparation
+
+```{r}
+
+# Utility 
+num_only  <- function(df) dplyr::select(df, where(is.numeric))
+non_num   <- function(df) dplyr::select(df, !where(is.numeric))
+get_clean <- function(x) if (is.list(x) && "clean" %in% names(x)) x$clean else x
+
+```
+
+## 1.1 Input data
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# --- QC_TR ---
+QC_TR_TreeSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/QC_TR_TreeSector.csv")
+QC_TR_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/QC_TR_BranchSector_WIDE.csv")
+QC_TR_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/QC_TR_CanopySector.csv")
+
+# --- QC_CP ---
+QC_CP_TreeSector   <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/QC_CP_TreeSector.csv",)
+QC_CP_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/QC_CP_BranchSector_WIDE.csv")
+QC_CP_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/QC_CP_CanopySector.csv")
+
+# --- FS_HF ---
+FS_HF_TreeSector   <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/FS_HF_TreeSector.csv")
+FS_HF_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/FS_HF_BranchSector_WIDE.csv")
+FS_HF_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/FS_HF_CanopySector.csv")
+
+# --- PM_R---
+PM_R_TreeSector   <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/PM_R_TreeSector.csv")
+PM_R_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/PM_R_BranchSector_WIDE.csv")
+PM_R_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/PM_R_CanopySector.csv")
+
+```
+
+## 1.2 Output data
+
+```{r}
+
+output <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors" 
+dir.create(file.path(output, "01_descriptives"), recursive = TRUE, showWarnings = FALSE)
+
+```
+
+## 1.3 outlayer detection
+
+Identifies and removes outliers from a data frame based on z-scores (the number of standard deviations from the mean) for all numeric variables.
+
+1.  Selects only numeric columns from the input data frame.
+2.  Computes the z-score for each numeric variable (mean = 0, sd = 1).
+3.  Flags rows where at least one variable exceeds ±thresh (default = 3 SD).
+
+```{r}
+
+z_outliers <- function(df, 
+                       name, 
+                       thresh = 3, 
+                       output_dir = output) 
+  
+  {  cat("\nProcessing:", name, "\n")
+  
+     num_df <- dplyr::select(df, where(is.numeric))
+     if (ncol(num_df) < 1) {
+     warning("No numeric variables in ", name)
+     return(df)
+  }
+  
+z <- scale(num_df)
+  
+  # Flag  outlier (TRUE if > ±3 SD)
+  df$is_outlier <- apply(abs(z) > thresh, 
+                                   1,
+                                   any, 
+                                   na.rm = TRUE)
+    n_out <- sum(df$is_outlier,
+                 na.rm = TRUE)
+  cat("Flagged", n_out, 
+      "potential outliers (", 
+      round(100 * n_out / nrow(df), 2), "%)\n")
+  
+  # save
+  df_clean <- df[!df$is_outlier, ]
+  readr::write_csv(df, file.path(output_dir, paste0(name, "_FLAGGED.csv")))
+  readr::write_csv(df_clean, file.path(output_dir, paste0(name, "_CLEAN.csv")))
+  
+  invisible(list(clean = df_clean, outliers = df[df$is_outlier, ]))
+}
+
+# APPLY 
+
+# QC_TR
+QC_TR_Tree_clean   <- z_outliers(QC_TR_TreeSector,   "QC_TR_TreeSector")
+QC_TR_Branch_clean <- z_outliers(QC_TR_BranchSector, "QC_TR_BranchSector")
+QC_TR_Canopy_clean <- z_outliers(QC_TR_CanopySector, "QC_TR_CanopySector")
+
+# QC_CP
+QC_CP_Tree_clean   <- z_outliers(QC_CP_TreeSector,   "QC_CP_TreeSector")
+QC_CP_Branch_clean <- z_outliers(QC_CP_BranchSector, "QC_CP_BranchSector")
+QC_CP_Canopy_clean <- z_outliers(QC_CP_CanopySector, "QC_CP_CanopySector")
+
+# FS_HF
+FS_HF_Tree_clean   <- z_outliers(FS_HF_TreeSector,   "FS_HF_TreeSector")
+FS_HF_Branch_clean <- z_outliers(FS_HF_BranchSector, "FS_HF_BranchSector")
+FS_HF_Canopy_clean <- z_outliers(FS_HF_CanopySector, "FS_HF_CanopySector")
+
+# PM_R
+PM_R_Tree_clean    <- z_outliers(PM_R_TreeSector,    "PM_R_TreeSector")
+PM_R_Branch_clean  <- z_outliers(PM_R_BranchSector,  "PM_R_BranchSector")
+PM_R_Canopy_clean  <- z_outliers(PM_R_CanopySector,  "PM_R_CanopySector")
+
+```
+
+## Utilities: Volume unit conversion (L → m³) 
+```{r}
+
+scale_if_numeric <- function(df,cols,factor) 
+  {
+  present <- intersect(cols, names(df))
+  if (length(present) == 0) return(df)
+
+  df %>%
+    mutate(across(all_of(present),
+                  ~ if (is.numeric(.)) . / factor else .))
+}
+
+scale_if_numeric_regex <- function(df, pattern, factor) {
+  target_cols <- names(df)[str_detect(names(df), pattern)]
+  if (length(target_cols) == 0) return(df)
+  
+  df %>%
+    mutate(across(all_of(target_cols),
+                  ~ if (is.numeric(.)) . / factor else .))
+}
+
+# Tree sector: convert QSM volumes from L to m³
+convert_tree_units <- function(df) {
+  liter_cols <- c("TotalVolume", "TrunkVolume", "BranchVolume")
+  scale_if_numeric(df, liter_cols, factor = 1000)
+}
+
+# Branch sector (wide): convert branch volumes from L to m³
+convert_branch_units <- function(df) {
+  pattern <- "^(BVol|BVT)"   # inizia con BVol o BVT
+  scale_if_numeric_regex(df, pattern, factor = 1000)
+}
+
+# Canopy sector: crown_volume already in m³ (no change)
+convert_canopy_units <- function(df) {
+  df
+}
+
+# Wrapper: apply conversion to z_outliers() objects (list with $clean)
+convert_clean_obj <- function(obj, converter) {
+  if (is.list(obj) && "clean" %in% names(obj)) {
+    obj$clean <- converter(obj$clean)
+    return(obj)
+  }
+  converter(obj)
+}
+
+
+# Apply 
+
+# TREE
+QC_TR_Tree_clean <- convert_clean_obj(QC_TR_Tree_clean, convert_tree_units)
+QC_CP_Tree_clean <- convert_clean_obj(QC_CP_Tree_clean, convert_tree_units)
+FS_HF_Tree_clean <- convert_clean_obj(FS_HF_Tree_clean, convert_tree_units)
+PM_R_Tree_clean  <- convert_clean_obj(PM_R_Tree_clean,  convert_tree_units)
+
+# BRANCH
+QC_TR_Branch_clean <- convert_clean_obj(QC_TR_Branch_clean, convert_branch_units)
+QC_CP_Branch_clean <- convert_clean_obj(QC_CP_Branch_clean, convert_branch_units)
+FS_HF_Branch_clean <- convert_clean_obj(FS_HF_Branch_clean, convert_branch_units)
+PM_R_Branch_clean  <- convert_clean_obj(PM_R_Branch_clean,  convert_branch_units)
+
+# CANOPY
+QC_TR_Canopy_clean <- convert_clean_obj(QC_TR_Canopy_clean, convert_canopy_units)
+QC_CP_Canopy_clean <- convert_clean_obj(QC_CP_Canopy_clean, convert_canopy_units)
+FS_HF_Canopy_clean <- convert_clean_obj(FS_HF_Canopy_clean, convert_canopy_units)
+PM_R_Canopy_clean  <- convert_clean_obj(PM_R_Canopy_clean,  convert_canopy_units)
+
+
+save_clean_df <- function(obj, filename, output_dir = output) {
+  
+  # z_outliers() clean
+  df_clean <- if (is.list(obj) && "clean" %in% names(obj)) obj$clean else obj
+  
+  # Save
+  readr::write_csv(df_clean,
+                   file.path(output_dir, paste0(filename, ".csv")))
+  
+  message("Saved: ", filename)
+}
+
+# --- TREE ---
+save_clean_df(QC_TR_Tree_clean,  "QC_TR_TreeSector_CLEAN")
+save_clean_df(QC_CP_Tree_clean,  "QC_CP_TreeSector_CLEAN")
+save_clean_df(FS_HF_Tree_clean,  "FS_HF_TreeSector_CLEAN")
+save_clean_df(PM_R_Tree_clean,   "PM_R_TreeSector_CLEAN")
+
+# --- BRANCH ---
+save_clean_df(QC_TR_Branch_clean, "QC_TR_BranchSector_CLEAN")
+save_clean_df(QC_CP_Branch_clean, "QC_CP_BranchSector_CLEAN")
+save_clean_df(FS_HF_Branch_clean, "FS_HF_BranchSector_CLEAN")
+save_clean_df(PM_R_Branch_clean,  "PM_R_BranchSector_CLEAN")
+
+# --- CANOPY ---
+save_clean_df(QC_TR_Canopy_clean, "QC_TR_CanopySector_CLEAN")
+save_clean_df(QC_CP_Canopy_clean, "QC_CP_CanopySector_CLEAN")
+save_clean_df(FS_HF_Canopy_clean, "FS_HF_CanopySector_CLEAN")
+save_clean_df(PM_R_Canopy_clean,  "PM_R_CanopySector_CLEAN")
+
+```
+
+## 1.4 Descriptive Statistics 
+```{r}
+
+library(tidyverse)
+library(psych)
+
+# helpers
+num_only  <- function(df) dplyr::select(df, where(is.numeric))
+get_clean <- function(x) if (is.list(x) && "clean" %in% names(x)) x$clean else x
+
+# describe() + CV(%)
+describe_with_cv <- function(df) {
+  df_num <- num_only(df)
+  if (ncol(df_num) == 0) return(NULL)
+  
+  psych::describe(df_num) %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("Variable") %>%
+    mutate(
+      CV_perc = ifelse(
+        is.finite(mean) & mean != 0,
+        100 * sd / abs(mean),
+        NA_real_
+      )
+    )
+}
+
+# TREE
+QC_TR_Tree_df <- get_clean(QC_TR_Tree_clean)
+QC_CP_Tree_df <- get_clean(QC_CP_Tree_clean)
+FS_HF_Tree_df <- get_clean(FS_HF_Tree_clean)
+PM_R_Tree_df  <- get_clean(PM_R_Tree_clean)
+
+# BRANCH
+QC_TR_Branch_df <- get_clean(QC_TR_Branch_clean)
+QC_CP_Branch_df <- get_clean(QC_CP_Branch_clean)
+FS_HF_Branch_df <- get_clean(FS_HF_Branch_clean)
+PM_R_Branch_df  <- get_clean(PM_R_Branch_clean)
+
+# CANOPY
+QC_TR_Canopy_df <- get_clean(QC_TR_Canopy_clean)
+QC_CP_Canopy_df <- get_clean(QC_CP_Canopy_clean)
+FS_HF_Canopy_df <- get_clean(FS_HF_Canopy_clean)
+PM_R_Canopy_df  <- get_clean(PM_R_Canopy_clean)
+
+# Save 
+
+output_desc <- file.path(output, "01_descriptives")
+dir.create(output_desc, recursive = TRUE, showWarnings = FALSE)
+
+save_desc <- function(df, pop, sector) {
+  dsc <- describe_with_cv(df)
+  if (is.null(dsc)) return(invisible(NULL))
+  
+  filename <- paste0("DESC_", pop, "_", sector, ".csv")
+  readr::write_csv(dsc, file.path(output_desc, filename))
+  message("Saved: ", filename)
+}
+
+# TREE
+save_desc(QC_TR_Tree_df, "QC_TR", "Tree")
+save_desc(QC_CP_Tree_df, "QC_CP", "Tree")
+save_desc(FS_HF_Tree_df, "FS_HF", "Tree")
+save_desc(PM_R_Tree_df,  "PM_R",  "Tree")
+
+# BRANCH
+save_desc(QC_TR_Branch_df, "QC_TR", "Branch")
+save_desc(QC_CP_Branch_df, "QC_CP", "Branch")
+save_desc(FS_HF_Branch_df, "FS_HF", "Branch")
+save_desc(PM_R_Branch_df,  "PM_R",  "Branch")
+
+# CANOPY
+save_desc(QC_TR_Canopy_df, "QC_TR", "Canopy")
+save_desc(QC_CP_Canopy_df, "QC_CP", "Canopy")
+save_desc(FS_HF_Canopy_df, "FS_HF", "Canopy")
+save_desc(PM_R_Canopy_df,  "PM_R",  "Canopy")
+
+```
+
+```{r}
+#LIST DATA
+
+tree_list <- list(
+  QC_TR = QC_TR_Tree_df,
+  QC_CP = QC_CP_Tree_df,
+  FS_HF = FS_HF_Tree_df,
+  PM_R  = PM_R_Tree_df
+)
+
+branch_list <- list(
+  QC_TR = QC_TR_Branch_df,
+  QC_CP = QC_CP_Branch_df,
+  FS_HF = FS_HF_Branch_df,
+  PM_R  = PM_R_Branch_df
+)
+
+canopy_list <- list(
+  QC_TR = QC_TR_Canopy_df,
+  QC_CP = QC_CP_Canopy_df,
+  FS_HF = FS_HF_Canopy_df,
+  PM_R  = PM_R_Canopy_df
+)
+
+# output
+output_desc <- file.path(output, "01_descriptives")
+
+make_sector_summary <- function(sector_list, sector_name) {
+  all_sec <- purrr::imap_dfr(
+    sector_list,
+    function(df, pop) {
+      dsc <- describe_with_cv(df)
+      if (is.null(dsc)) return(NULL)
+      dsc %>%
+        mutate(
+          Population = pop,
+          Sector     = sector_name,
+          .before = 1  
+        )
+    }
+  )
+  
+  # SAVE
+  filename <- paste0("DESC_ALL_", sector_name, ".csv")
+  readr::write_csv(all_sec, file.path(output_desc, filename))
+  message("Saved: ", filename)
+  
+  all_sec
+}
+
+# APPLY
+
+DESC_ALL_Tree   <- make_sector_summary(tree_list,   "Tree")
+DESC_ALL_Branch <- make_sector_summary(branch_list, "Branch")
+DESC_ALL_Canopy <- make_sector_summary(canopy_list, "Canopy")
+
+```
+
+## 1.4.1 Descriptive Plots for tree sector
+
+```{r}
+# METRICS UNITS
+tree_var_units <- c(
+  DAB          = "m",
+  H            = "m",
+  ba           = "m²",
+  TotalVolume  = "m³",
+  TrunkVolume  = "m³",
+  BranchVolume = "m³",
+  BranchLength = "m",
+  TrunkLength = "m",
+  DBHqsm  = "m"
+)
+
+# folder plots output
+tree_plot_dir <- file.path(output, "02_plots_Tree_bar")
+dir.create(tree_plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+plot_tree_variable <- function(var_name, desc_tbl = DESC_ALL_Tree) {
+  
+  dat <- desc_tbl %>%
+    filter(Variable == var_name)
+  
+  if (nrow(dat) == 0) return(invisible(NULL))
+  
+  # Etichetta asse Y con unità se disponibile
+  ylab_txt <- if (var_name %in% names(tree_var_units)) {
+    paste0(var_name, " [", tree_var_units[[var_name]], "]")
+  } else {
+    var_name
+  }
+  
+  p <- ggplot(dat, aes(x = Population, y = mean, fill = Population)) +
+    geom_col(color = "black", width = 0.65) +
+    geom_errorbar(
+      aes(ymin = mean - sd, ymax = mean + sd),
+      width = 0.2,
+      color = "black"
+    ) +
+    labs(
+      title = paste0(var_name, " – Tree sector"),
+      x = "Population",
+      y = ylab_txt,
+      fill = "Population"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title.x = element_text(face = "bold"),
+      axis.title.y = element_text(face = "bold"),
+      legend.position = "none"
+    ) +
+    scale_fill_grey(start = 0.85, end = 0.2)
+  
+  ggsave(
+    filename = file.path(tree_plot_dir, paste0("BAR_Tree_", var_name, ".png")),
+    plot   = p,
+    width  = 7,
+    height = 5,
+    dpi    = 600
+  )
+  
+  invisible(p)
+}
+
+
+tree_vars <- unique(DESC_ALL_Tree$Variable)
+
+# save
+invisible(lapply(tree_vars, plot_tree_variable))
+
+```
+
+## 1.4.2 Descriptive Plots for branch sector
+
+```{r}
+
+library(stringr)
+
+#  folder plots output 
+branch_plot_dir <- file.path(output, "02_plots_Branch_bar")
+dir.create(branch_plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+# arrange data
+branch_desc_long <- DESC_ALL_Branch %>%
+  mutate(
+    Metric = str_remove(Variable, "_o[0-9]+$"),                 # "BN_o1" -> "BN"
+    Order  = as.integer(str_extract(Variable, "(?<=_o)[0-9]+")) # "BN_o1" -> 1
+  ) %>%
+  filter(!is.na(Order))
+
+# label
+branch_y_lab <- function(metric) {
+  dplyr::case_when(
+    metric == "BN"          ~ "Mean number of branches per tree",
+    metric == "BLen_mean"   ~ "Mean branch length [m]",
+    metric == "BLen_tot"    ~ "Total branch length [m]",
+    metric == "BVol_mean"   ~ "Mean branch volume [m³]",
+    metric == "BVol_tot"    ~ "Total branch volume [m³]",
+    metric == "Bang_mean"   ~ "Mean branch angle [deg]",
+    TRUE                    ~ metric
+  )
+}
+
+# plot
+plot_branch_metric <- function(metric, desc_tbl = branch_desc_long) {
+  
+  dat <- desc_tbl %>% filter(Metric == metric)
+  if (nrow(dat) == 0) return(invisible(NULL))
+ 
+  ord_levels <- sort(unique(dat$Order))
+  dat <- dat %>% mutate(Order = factor(Order, levels = ord_levels))
+  
+  p <- ggplot(dat, aes(x = Order,
+                       y = mean,
+                       fill = Population)) +
+    geom_col(position = position_dodge(width = 0.7),
+             color = "black",
+             width = 0.7) +
+    geom_errorbar(
+      aes(ymin = mean - sd, ymax = mean + sd),
+      position = position_dodge(width = 0.7),
+      width = 0.2,
+      color = "black"
+    ) +
+    labs(
+      title = paste0(metric, " – Branch sector"),
+      x = "Branch order",
+      y = branch_y_lab(metric),
+      fill = "Population"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title.x = element_text(face = "bold"),
+      axis.title.y = element_text(face = "bold")
+    ) +
+    scale_fill_grey(start = 0.85, end = 0.2)
+  
+  ggsave(
+    filename = file.path(branch_plot_dir,
+                         paste0("BAR_Branch_", metric, "_byOrder.png")),
+    plot   = p,
+    width  = 7,
+    height = 5,
+    dpi    = 600
+  )
+  
+  invisible(p)
+}
+
+branch_metrics <- unique(branch_desc_long$Metric)
+
+# save
+invisible(lapply(branch_metrics, plot_branch_metric))
+
+# summary table
+
+branch_summary_table <- branch_desc_long %>%
+  select(Population, Metric, Order, n, mean, sd, CV_perc) %>%
+  arrange(Metric, Order, Population)
+
+# save
+output_summary <- file.path(output, "01_descriptives")
+readr::write_csv(branch_summary_table,
+                 file.path(output_summary, "BranchSector_SUMMARY.csv"))
+
+# stampa anteprima
+print(head(branch_summary_table, 20))
+
+
+```
+
+## 1.4.2 Descriptive Plots for canopy sector
+
+```{r}
+
+library(tidyverse)
+
+# metrics units
+canopy_var_units <- c(
+  crown_base_height = "m",
+  crown_length      = "m",
+  crown_pa          = "m²",
+  crown_volume      = "m³",
+  cr_percent        = "%",
+  crown_density     = "–"
+)
+
+#  folder plots output 
+canopy_plot_dir <- file.path(output, "02_plots_Canopy_bar")
+dir.create(canopy_plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+plot_canopy_variable <- function(var_name, desc_tbl = DESC_ALL_Canopy) {
+  
+  dat <- desc_tbl %>%
+    dplyr::filter(Variable == var_name)
+  
+  if (nrow(dat) == 0) return(invisible(NULL))
+  
+  # Etichetta asse Y con unità (se disponibile)
+  ylab_txt <- if (var_name %in% names(canopy_var_units)) {
+    paste0(var_name, " [", canopy_var_units[[var_name]], "]")
+  } else {
+    var_name
+  }
+  
+  p <- ggplot(dat, aes(x = Population, y = mean, fill = Population)) +
+    geom_col(color = "black", width = 0.65) +
+    geom_errorbar(
+      aes(ymin = mean - sd, ymax = mean + sd),
+      width = 0.2,
+      color = "black"
+    ) +
+    labs(
+      title = paste0(var_name, " – Canopy sector"),
+      x = "Population",
+      y = ylab_txt,
+      fill = "Population"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      panel.grid = element_blank(),
+      panel.background = element_blank(),
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title.x = element_text(face = "bold"),
+      axis.title.y = element_text(face = "bold"),
+      legend.position = "none"
+    ) +
+    scale_fill_grey(start = 0.85, end = 0.2)
+  
+  ggsave(
+    filename = file.path(canopy_plot_dir, paste0("BAR_Canopy_", var_name, ".png")),
+    plot   = p,
+    width  = 7,
+    height = 5,
+    dpi    = 600
+  )
+  
+  invisible(p)
+}
+
+canopy_vars <- unique(DESC_ALL_Canopy$Variable)
+
+# save
+invisible(lapply(canopy_vars, plot_canopy_variable))
+
+```
+
