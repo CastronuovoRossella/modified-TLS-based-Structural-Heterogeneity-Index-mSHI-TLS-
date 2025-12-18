@@ -1,0 +1,306 @@
+---
+title: "Untitled"
+author: "Rossella Castronuovo"
+date: "2025-10-14"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Load libraries
+library(readxl)
+library(psych)
+library(tidyverse)
+library(FactoMineR)
+library(magrittr)
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(tools)
+library(tidyr)
+
+```
+
+# Metrics selection and sector creation
+
+All derived metrics were subsequently grouped into three structural domains:
+
+1.	Tree sector: global size and stem architecture (e.g. DBH, height, total volume, trunk length).
+2.	Branch sector: branching hierarchy and geometry (branch order, angles, lengths, volume fractions).
+3.	Canopy sector: crown geometry and space occupation (crown length, crown volume, projected area, crown density).
+
+This hierarchical approach separates strongly correlated variables, reduce dimensionality in a structured way, and avoid dominance of numerically redundant metric sets (Dormann et al. 2013). 
+
+## 1. Analysis preparation
+## 1.1 Input data
+
+```{r message=FALSE, warning=TRUE, paged.print=FALSE}
+
+# Load CSV cloud
+QC_TR_Cloud<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Qc_Tr_cloud.csv")
+QC_CP_Cloud<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Qc_Cp_cloud.csv")
+PM_R_Cloud<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Pm_R_cloud.csv")
+FS_HF_Cloud<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Fs_Hf_cloud.csv")
+
+# Load branch file
+QC_TR_Branch<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Qc_Tr_branch.csv")
+QC_CP_Branch<- read_xlsx("E:/DELL/Lidar structure index/Stat/Results/Row_data/Qc_Cp_branch.xlsx")
+PM_R_Branch<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Pm_R_branch.csv")
+FS_HF_Branch<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Fs_Hf_branch.csv")
+  
+# Load mat file
+QC_TR_TreeData<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Qc_Tr_treeData.csv")
+QC_CP_TreeData <- read_delim("E:/DELL/Lidar structure index/Stat/Results/Row_data/Qc_Cp_treeData.csv",
+                  delim = ";", 
+                  show_col_types = FALSE)
+PM_R_TreeData<- read_csv("E:/DELL/Lidar structure index/Stat/Results/Row_data/Pm_R_treeData.csv")
+FS_HF_TreeData <- read_delim("E:/DELL/Lidar structure index/Stat/Results/Row_data/Fs_Hf_treeData.csv",
+                  delim = ";",  
+                  show_col_types = FALSE,  
+                  trim_ws = TRUE)
+  
+```
+
+## 1.2 Output data
+
+```{r}
+output <- "E:/DELL/Lidar structure index/Stat/Results/Sectors" 
+```
+
+## 1.3 Arrange TreeData sector
+
+```{r}
+
+# Extract treeData Sector Metrics from point-cloud
+
+TreeSector <- function(cloud_df, 
+                             pop_label = NULL) {
+                                                  cloud_df %>%
+                                                  dplyr::select(file_name, 
+                                                                source, 
+                                                                DAB, 
+                                                                H   
+) 
+}
+
+QC_TR_Tree <- TreeSector(QC_TR_Cloud, pop_label = "Qc_Tr")
+QC_CP_Tree <- TreeSector(QC_CP_Cloud, pop_label = "Qc_Cp")
+FS_HF_Tree <- TreeSector(FS_HF_Cloud, pop_label = "Fs_Hf")
+PM_R_Tree <- TreeSector(PM_R_Cloud, pop_label = "PM_R")
+
+# Extract treeData Sector Metrics from matfile
+
+# --- PM_R ---
+PM_R_TreeData <- PM_R_TreeData %>%
+  select(-TreeHeight, -TotalArea) %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+PM_R_Cloud <- PM_R_Tree %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+PM_R_TreeDatasector <- PM_R_Cloud %>%
+  left_join(select(PM_R_TreeData, -file_name), by = "key") %>%
+  select(-key)
+
+# --- Qc_Tr ---
+QC_TR_TreeData <- QC_TR_TreeData %>%
+  select(-TreeHeight, -TotalArea) %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+QC_TR_Cloud <- QC_TR_Tree %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+QC_TR_TreeDatasector <- QC_TR_Cloud %>%
+  left_join(select(QC_TR_TreeData, -file_name), by = "key") %>%
+  select(-key)
+
+# --- Qc_Cp ---
+QC_CP_TreeData <- QC_CP_TreeData %>%
+  select(-TreeHeight, -TotalArea) %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+QC_CP_Cloud <- QC_CP_Tree %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+QC_CP_TreeDatasector <- QC_CP_Cloud %>%
+  left_join(select(QC_CP_TreeData, -file_name), by = "key") %>%
+  select(-key)
+
+# --- Fs_Hf ---
+FS_HF_TreeData <- FS_HF_TreeData %>%
+  select(-TreeHeight, -TotalArea) %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+FS_HF_Cloud <- FS_HF_Tree %>%
+  mutate(key = tolower(file_path_sans_ext(basename(file_name))))
+
+FS_HF_TreeDatasector <- FS_HF_Cloud %>%
+  left_join(select(FS_HF_TreeData, -file_name), by = "key") %>%
+  select(-key)
+
+#  Ba
+
+QC_TR_TreeDatasector <- QC_TR_TreeDatasector %>%
+  mutate(ba = pi * (DBHqsm/2)^2)
+
+QC_CP_TreeDatasector <- QC_CP_TreeDatasector %>%
+  mutate(ba = pi * (DBHqsm/2)^2)
+
+FS_HF_TreeDatasector <- FS_HF_TreeDatasector %>%
+  mutate(ba = pi * (DBHqsm/2)^2)
+
+PM_R_TreeDatasector <- PM_R_TreeDatasector %>%
+  mutate(ba = pi * (DBHqsm/2)^2)
+
+
+# Save
+
+write.csv(QC_TR_TreeDatasector, 
+          file = file.path(output, "QC_TR_TreeSector.csv"), 
+          row.names = FALSE)
+
+write.csv(QC_CP_TreeDatasector, 
+          file = file.path(output, "QC_CP_TreeSector.csv"), 
+          row.names = FALSE)
+
+write.csv(FS_HF_TreeDatasector, 
+          file = file.path(output, "FS_HF_TreeSector.csv"), 
+          row.names = FALSE)
+
+write.csv(PM_R_TreeDatasector, 
+          file = file.path(output, "PM_R_TreeSector.csv"), 
+          row.names = FALSE)
+```
+
+## 1.4 Arrange Branch Data sector
+
+```{r}
+
+Branch_sector <- function(branch_df) {
+  
+  # ---- remove order 0 (trunk)
+  branch_df <- branch_df %>%
+    filter(order != 0) %>%
+    rename(file_name = FileName)
+  
+  # ---- totals per tree
+  totals <- branch_df %>%
+    group_by(file_name) %>%
+    summarise(
+      totN = n(),
+      totV = sum(volume, na.rm = TRUE),
+      totL = sum(length, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  # ---- metrics per tree × order
+  long <- branch_df %>%
+    group_by(file_name, order) %>%
+    summarise(
+      BOrd        = first(order),
+      BN          = n(),
+      
+      # mean values
+      BVol_mean   = mean(volume, na.rm = TRUE),
+      BLen_mean   = mean(length, na.rm = TRUE),
+      Bang_mean   = mean(angle,  na.rm = TRUE),
+      
+      # total values
+      BVol_tot    = sum(volume,  na.rm = TRUE),
+      BLen_tot    = sum(length,  na.rm = TRUE),
+      
+           .groups     = "drop"
+    ) %>%
+    left_join(totals, by = "file_name") %>%
+    mutate(
+      PN = if_else(totN > 0, 100 * BN        / totN, NA_real_),
+      PV = if_else(totV > 0, 100 * BVol_tot  / totV, NA_real_),
+      PL = if_else(totL > 0, 100 * BLen_tot  / totL, NA_real_)
+    ) %>%
+    arrange(file_name, BOrd)
+  
+  # ---- WIDE format
+  wide <- long %>%
+    pivot_wider(
+      id_cols     = file_name,
+      names_from  = BOrd,
+      values_from = c(BN, BVol_mean, BVol_tot, 
+                      BLen_mean, BLen_tot, Bang_mean, PN, PV, PL),
+      names_glue  = "{.value}_o{BOrd}"
+    )
+  
+  # ---- order columns (file_name first)
+  ord_cols <- c("file_name", sort(setdiff(names(wide), "file_name")))
+  wide[, ord_cols]
+}
+
+# APPLY 
+
+QC_TR_BranchSector_wide <- Branch_sector(QC_TR_Branch)
+QC_CP_BranchSector_wide <- Branch_sector(QC_CP_Branch)
+FS_HF_BranchSector_wide <- Branch_sector(FS_HF_Branch)
+PM_R_BranchSector_wide  <- Branch_sector(PM_R_Branch)
+
+# SAVE
+
+write.csv(QC_TR_BranchSector_wide, file.path(output, "QC_TR_BranchSector_WIDE.csv"), row.names = FALSE)
+write.csv(QC_CP_BranchSector_wide, file.path(output, "QC_CP_BranchSector_WIDE.csv"), row.names = FALSE)
+write.csv(FS_HF_BranchSector_wide, file.path(output, "FS_HF_BranchSector_WIDE.csv"), row.names = FALSE)
+write.csv(PM_R_BranchSector_wide,  file.path(output, "PM_R_BranchSector_WIDE.csv"),  row.names = FALSE)
+
+```
+
+## 1.5 Arrange Canopy Data sector
+
+```{r}
+
+Canopy_sector <- function(tree_sector_df, cloud_df) {
+
+  canopy_df <- cloud_df %>%
+    transmute(
+      file_name,
+      source,
+      crown_base_height,
+      crown_length,
+      crown_pa,
+      crown_volume,
+      H,
+      cr_percent = 100 * (crown_length / H)
+    )
+
+  branchvol_df <- tree_sector_df %>%
+    select(file_name, BranchVolume)   
+
+  canopy_df %>%
+    left_join(branchvol_df, by = "file_name") %>%
+    mutate(
+            crown_density = 100 * (BranchVolume / 1000) / crown_volume,    )
+}
+
+# APPLY TO ALL POPULATIONS
+
+QC_TR_Canopy <- Canopy_sector(QC_TR_TreeDatasector, QC_TR_Cloud)
+QC_CP_Canopy <- Canopy_sector(QC_CP_TreeDatasector, QC_CP_Cloud)
+FS_HF_Canopy <- Canopy_sector(FS_HF_TreeDatasector, FS_HF_Cloud)
+PM_R_Canopy <- Canopy_sector(PM_R_TreeDatasector, PM_R_Cloud)
+
+# SAVE OUTPUT
+
+QC_TR_Canopy %>%
+  select(-BranchVolume, -H) %>%
+  write.csv(file.path(output, "QC_TR_CanopySector.csv"), row.names = FALSE)
+
+QC_CP_Canopy %>%
+  select(-BranchVolume, -H) %>%
+  write.csv(file.path(output, "QC_CP_CanopySector.csv"), row.names = FALSE)
+
+FS_HF_Canopy %>%
+  select(-BranchVolume, -H) %>%
+  write.csv(file.path(output, "FS_HF_CanopySector.csv"), row.names = FALSE)
+
+PM_R_Canopy %>%
+  select(-BranchVolume, -H) %>%
+  write.csv(file.path(output, "PM_R_CanopySector.csv"), row.names = FALSE)
+
+```
+
