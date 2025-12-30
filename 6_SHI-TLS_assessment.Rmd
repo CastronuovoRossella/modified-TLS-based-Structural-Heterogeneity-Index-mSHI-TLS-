@@ -1,0 +1,229 @@
+---
+title: "Validation analysis"
+author: "Rossella Castronuovo"
+date: "2025-12-09"
+output: html_document
+---
+
+## Data extraction
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(dplyr)
+library(readr)
+
+path_val  <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Validation"
+path_sect <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors"
+path_row <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Row_data"
+
+## --- QC_TR ---
+QC_TR_1 <- read_csv(file.path(path_val, "QC_TR_alpha_metrics.csv"))
+QC_TR_2 <- read_csv(file.path(path_val, "QC_TR_crown_sinuosity.csv"))
+QC_TR_3 <- read_csv(file.path(path_val, "Qc_Tr_CrownMetrics.csv"))
+QC_TR_4 <- read_csv(file.path(path_val, "Qc_Tr_dis.csv"))
+QC_TR_Can <- read_csv(file.path(path_sect, "QC_TR_CanopySector.csv"))
+QC_TR_Br <- read_csv(file.path(path_row, "QC_TR_Branch.csv"))
+
+## --- FS_HF ---
+FS_HF_1 <- read_csv(file.path(path_val, "FS_HF_alpha_metrics.csv"))
+FS_HF_2 <- read_csv(file.path(path_val, "FS_HF_crown_sinuosity.csv"))
+FS_HF_3 <- read_csv(file.path(path_val, "FS_HF_CrownMetrics.csv"))
+FS_HF_4 <- read_csv(file.path(path_val, "FS_HF_dis.csv"))
+FS_HF_Br <- read_csv(file.path(path_row, "FS_HF_Branch.csv"))
+FS_HF_Can <- read_csv(file.path(path_sect, "FS_HF_CanopySector.csv"))
+
+## --- PM_R ---
+PM_R_1 <- read_csv(file.path(path_val, "PM_R_alpha_metrics.csv"))
+PM_R_2 <- read_csv(file.path(path_val, "PM_R_crown_sinuosity.csv"))
+PM_R_3 <- read_csv(file.path(path_val, "Pm_R_CrownMetrics.csv"))
+PM_R_4 <- read_csv(file.path(path_val, "Pm_R_dis.csv"))
+PM_R_Br <- read_csv(file.path(path_row, "PM_R_Branch.csv"))
+PM_R_Can <- read_csv(file.path(path_sect, "PM_R_CanopySector.csv"))
+
+## --- QC_CP ---
+QC_CP_1 <- read_csv(file.path(path_val, "QC_CP_alpha_metrics.csv"))
+
+QC_CP_2 <- read_delim(
+  file.path(path_val, "QC_CP_crown_sinuosity.csv"),
+  delim = ";",
+  show_col_types = FALSE
+)
+
+QC_CP_3 <- read_csv(file.path(path_val, "Qc_Cp_CrownMetrics.csv"))
+QC_CP_4 <- read_csv(file.path(path_val, "QC_CP_dis.csv"))
+QC_CP_Br <- read_delim(file.path(path_row, "QC_CP_Branch.csv"),
+delim = ";",
+  show_col_types = FALSE
+)
+QC_CP_Can <- read_csv(file.path(path_sect, "QC_CP_CanopySector.csv"))
+
+add_file_id <- function(df) {
+  if ("file_name" %in% names(df)) {
+    df %>% mutate(file_id = sub("\\.[^.]+$", "", file_name))
+  } else if ("FileName" %in% names(df)) {
+    df %>% mutate(file_id = sub("\\.[^.]+$", "", FileName))
+  } else {
+    stop("Né 'file_name' né 'FileName' trovati in questo df.")
+  }
+}
+
+QC_TR_1   <- add_file_id(QC_TR_1);   QC_TR_2   <- add_file_id(QC_TR_2)
+QC_TR_3   <- add_file_id(QC_TR_3);   QC_TR_4   <- add_file_id(QC_TR_4)
+QC_TR_Br  <- add_file_id(QC_TR_Br);  QC_TR_Can <- add_file_id(QC_TR_Can)
+
+QC_CP_1   <- add_file_id(QC_CP_1);   QC_CP_2   <- add_file_id(QC_CP_2)
+QC_CP_3   <- add_file_id(QC_CP_3);   QC_CP_4   <- add_file_id(QC_CP_4)
+QC_CP_Br  <- add_file_id(QC_CP_Br);  QC_CP_Can <- add_file_id(QC_CP_Can)
+
+FS_HF_1   <- add_file_id(FS_HF_1);   FS_HF_2   <- add_file_id(FS_HF_2)
+FS_HF_3   <- add_file_id(FS_HF_3);   FS_HF_4   <- add_file_id(FS_HF_4)
+FS_HF_Br  <- add_file_id(FS_HF_Br);  FS_HF_Can <- add_file_id(FS_HF_Can)
+
+PM_R_1    <- add_file_id(PM_R_1);    PM_R_2    <- add_file_id(PM_R_2)
+PM_R_3    <- add_file_id(PM_R_3);    PM_R_4    <- add_file_id(PM_R_4)
+PM_R_Br   <- add_file_id(PM_R_Br);   PM_R_Can  <- add_file_id(PM_R_Can)
+
+merge_all_by_file_id <- function(...) {
+  Reduce(function(x, y) full_join(x, y, by = "file_id"), list(...))
+}
+
+QC_TR_validation <- merge_all_by_file_id(QC_TR_1, QC_TR_2, QC_TR_3, QC_TR_4, QC_TR_Br, QC_TR_Can)
+QC_CP_validation <- merge_all_by_file_id(QC_CP_1, QC_CP_2, QC_CP_3, QC_CP_4, QC_CP_Br, QC_CP_Can)
+FS_HF_validation <- merge_all_by_file_id(FS_HF_1, FS_HF_2, FS_HF_3, FS_HF_4, FS_HF_Br, FS_HF_Can)
+PM_R_validation  <- merge_all_by_file_id(PM_R_1,  PM_R_2,  PM_R_3,  PM_R_4,  PM_R_Br,  PM_R_Can)
+
+dim(QC_TR_validation)
+dim(QC_CP_validation)
+dim(FS_HF_validation)
+dim(PM_R_validation)
+
+```
+## Output data
+
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+ output <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors" 
+
+
+```
+
+
+
+## Data selection
+
+```{r}
+library(dplyr)
+
+prep_tree_df_for_index <- function(df) {
+
+df1 <- df %>%
+select(
+-any_of(c(
+"file_name.x","alpha","n_points_crown","file_name.y","Pop.x","file_name.x.x",
+"source.y","Pop.y","source","cr_percent","crown_pa.x","file_name.y.y",
+"parent","lenght","angle","crown_length.y","crown_base_height.y",
+"crown_volume","File_Name","file_name"
+))
+)
+
+df_br_123 <- df1 %>% filter(order %in% c(1, 2, 3))
+
+br_sum <- df_br_123 %>%
+group_by(file_id) %>%
+summarise(vol_br_ord1_3 = sum(volume, na.rm = TRUE), .groups = "drop")
+
+tree_1row <- df1 %>%
+select(-order, -volume, -length, -FileName) %>%
+distinct(file_id, .keep_all = TRUE)
+
+left_join(tree_1row, br_sum, by = "file_id")
+}
+
+QC_TR_tree <- prep_tree_df_for_index(QC_TR_validation) %>% mutate(pop = "QC_TR")
+QC_CP_tree <- prep_tree_df_for_index(QC_CP_validation) %>% mutate(pop = "QC_CP")
+FS_HF_tree <- prep_tree_df_for_index(FS_HF_validation) %>% mutate(pop = "FS_HF")
+PM_R_tree <- prep_tree_df_for_index(PM_R_validation) %>% mutate(pop = "PM_R")
+
+ALL_tree <- bind_rows(QC_TR_tree, QC_CP_tree, FS_HF_tree, PM_R_tree)
+```
+
+```{r}
+cv <- function(x) {
+x <- x[is.finite(x)]
+if (length(x) < 2) return(NA_real_)
+sd(x) / mean(x)
+}
+
+gini <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) < 2) return(NA_real_)
+  x <- sort(x)
+  if (sum(x) == 0) return(NA_real_)
+  n <- length(x)
+  (2 * sum((1:n) * x) / (n * sum(x))) - (n + 1) / n
+}
+
+
+rng <- function(x) {
+x <- x[is.finite(x)]
+if (length(x) < 2) return(NA_real_)
+max(x) - min(x)
+}
+```
+
+```{r}
+calc_SH_variables <- function(df) {
+df %>%
+group_by(pop) %>%
+summarise(
+cr_density_R = rng(crown_density),
+cr_width_to_cr_length_CV = cv(cw_cl_ratio),
+cbh_GC = gini(crown_base_height.x),
+branch_volume_1_2_3_R = rng(vol_br_ord1_3),
+cr_disp_to_height_R = rng(crown_displacement / tree_height),
+cr_surface_area_GC = gini(crown_surface_alpha),
+cr_area_to_cr_volume_CV = cv(crown_pa.y / crown_volume_alpha),
+cr_sinuosity_GC = gini(crown_sinuosity),
+.groups = "drop"
+)
+}
+
+SH_all <- calc_SH_variables(ALL_tree)
+SH_all
+
+```
+
+```{r}
+
+score_01_p125_p875 <- function(x) {
+pL <- as.numeric(quantile(x, 0.125, na.rm = TRUE))
+pU <- as.numeric(quantile(x, 0.875, na.rm = TRUE))
+if (!is.finite(pL) || !is.finite(pU) || pU == pL) return(rep(0.5, length(x)))
+s <- (x - pL) / (pU - pL)
+pmin(1, pmax(0, s))
+}
+
+vars8 <- c(
+"cr_density_R",
+"cr_width_to_cr_length_CV",
+"cbh_GC",
+"branch_volume_1_2_3_R",
+"cr_disp_to_height_R",
+"cr_surface_area_GC",
+"cr_area_to_cr_volume_CV",
+"cr_sinuosity_GC"
+)
+
+SH_scored <- SH_all %>%
+mutate(across(all_of(vars8), score_01_p125_p875, .names = "score_{.col}")) %>%
+rowwise() %>%
+mutate(
+SHI_TLS = sum(c_across(starts_with("score_")), na.rm = TRUE),
+SHI_TLS_0_100 = SHI_TLS / length(vars8) * 100
+) %>%
+ungroup()
+
+SHI_TLS <- SH_scored %>% select(pop, SHI_TLS, SHI_TLS_0_100)
+write_csv(SHI_TLS, file.path(output, "SHI_TLS_scored.csv"))
+
+```

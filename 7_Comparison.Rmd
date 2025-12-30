@@ -1,0 +1,158 @@
+---
+title: "Untitled"
+author: "Rossella Castronuovo"
+date: "2025-12-16"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readr)
+
+# --------
+# Data
+# --------
+
+# carica i due indici
+mSHI_TLS <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors/mSHI_TLS_pop.csv")
+mSHI_TLS
+
+SHI_TLS <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors/SHI_TLS_scored.csv") 
+SHI_TLS
+
+```
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+
+
+
+# -------------------------
+# 2) Harmonise names + merge
+# -------------------------
+idx <- mSHI_TLS %>%
+  rename(pop = Pop) %>%
+  left_join(SHI_TLS, by = "pop") %>%
+  select(pop, median_mSHI, IQR_mSHI, SHI_TLS, SHI_TLS_0_100)
+
+idx
+
+# -------------------------
+# 3) Spearman correlation (ranking concordance)
+# -------------------------
+rho <- cor(idx$median_mSHI, idx$SHI_TLS, method = "spearman", use = "complete.obs")
+test_rho <- cor.test(idx$median_mSHI, idx$SHI_TLS, method = "spearman", exact = FALSE)
+
+rho
+test_rho
+
+# Optional: ranks (stand ordering)
+idx_ranked <- idx %>%
+  mutate(
+    rank_mSHI = rank(-median_mSHI, ties.method = "average"),
+    rank_SHI  = rank(-SHI_TLS,     ties.method = "average")
+  ) %>%
+  arrange(rank_mSHI)
+
+idx_ranked
+
+# -------------------------
+# 4) Scatter plot (Fig. …)
+# -------------------------
+p <- ggplot(idx, aes(x = SHI_TLS, y = median_mSHI, label = pop)) +
+  geom_point(size = 3) +
+  geom_text(nudge_y = 0.05, show.legend = FALSE) +
+  labs(
+    x = "SHI-TLS (Reich et al., 2021)",
+    y = "mSHI-TLS (median per stand)",
+    title = "Comparison between SHI-TLS and mSHI-TLS at stand level"
+  ) +
+  theme_minimal(base_size = 13)
+
+p
+
+# Save if needed
+ggsave(
+  filename = "Fig_indices_comparison_SHI_vs_mSHI.png",
+  plot = p, width = 6.5, height = 5.0, dpi = 600
+)
+
+```
+```{r}
+# ---- Merge ----
+idx <- mSHI_TLS %>%
+  rename(pop = Pop) %>%
+  left_join(SHI_TLS, by = "pop") %>%
+  mutate(pop = factor(pop, levels = c("FS_HF","PM_R","QC_CP","QC_TR"))) %>%
+  arrange(pop)
+
+# ---- Use SHI in 0-100 scale ----
+shi_col <- "SHI_TLS_0_100"
+
+# ---- Scaling factor for dual axis ----
+scale_factor <- max(idx[[shi_col]], na.rm = TRUE) / max(idx$median_mSHI, na.rm = TRUE)
+
+# ---- Plot ----
+p <- ggplot(idx, aes(x = pop)) +
+
+  # SHI-TLS 0-100 (left axis)
+  geom_line(aes(y = .data[[shi_col]], colour = "SHI-TLS", group = 1),
+            linewidth = 0.5) +
+  geom_point(aes(y = .data[[shi_col]], colour = "SHI-TLS"),
+             size = 3, shape = 16) +
+
+  # mSHI-TLS (right axis, rescaled)
+  geom_line(aes(y = median_mSHI * scale_factor,
+                colour = "mSHI-TLS", group = 1),
+            linewidth = 0.9) +
+  geom_point(aes(y = median_mSHI * scale_factor,
+                 colour = "mSHI-TLS"),
+             size = 3, shape = 16) +
+
+  scale_y_continuous(
+    name = "SHI-TLS (0–100)",
+    limits = c(0, 100),
+    sec.axis = sec_axis(~ . / scale_factor, name = "mSHI-TLS")
+  ) +
+
+  scale_colour_manual(
+    name = NULL,
+    values = c("SHI-TLS" = "black",
+               "mSHI-TLS" = "grey")
+  ) +
+
+  labs(x = "Forest Stands") +
+
+  theme_classic(base_size = 13) +
+  theme(
+    axis.title.x = element_text(face = "plain"),
+    axis.title.y.left  = element_text(face = "plain"),
+    axis.title.y.right = element_text(face = "plain"),
+    axis.line = element_line(colour = "black"),
+    axis.ticks = element_line(colour = "black"),
+    legend.position = "right",
+    legend.text = element_text(size = 11)
+  )
+
+# ---- Save ----
+ggsave(
+  filename = "Index_a.png",
+  plot = p,
+  path = "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors",
+  width = 7,
+  height = 4,
+  dpi = 1200
+)
+
+p
+
+
+
+```
+

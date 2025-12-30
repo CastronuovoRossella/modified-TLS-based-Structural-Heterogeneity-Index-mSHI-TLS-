@@ -1,0 +1,1035 @@
+---
+title: "Untitled"
+author: "Rossella Castronuovo"
+date: "2025-10-14"
+output: pdf_document
+editor_options: 
+markdown: 
+wrap: 72
+---
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(corrplot)
+library(readr)
+library(tibble)
+library(ggplot2)
+library(psych)
+library(corrplot)
+library(readr)
+
+```
+
+# Sector-level PCA analysis
+A hierarchical multivariate approach was used to describe structural heterogeneity while preserving the ecological meaning of each structural sector. 
+
+# Input files
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Load Sector Files (Tree, Branch, Canopy) 
+
+# QC_TR 
+QC_TR_TreeSector   <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/QC_TR_TreeSector_CLEAN.csv")
+QC_TR_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/QC_TR_BranchSector_CLEAN.csv")
+QC_TR_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/QC_TR_CanopySector_CLEAN.csv")
+
+# QC_CP
+QC_CP_TreeSector   <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/QC_CP_TreeSector_CLEAN.csv")
+QC_CP_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/QC_CP_BranchSector_CLEAN.csv")
+QC_CP_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/QC_CP_CanopySector_CLEAN.csv")
+
+# FS_HF 
+FS_HF_TreeSector   <- read_delim ("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/FS_HF_TreeSector_CLEAN.csv", 
+  delim = ",",  show_col_types = FALSE,  trim_ws = TRUE)
+FS_HF_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/FS_HF_BranchSector_CLEAN.csv")
+FS_HF_CanopySector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/FS_HF_CanopySector_CLEAN.csv")
+
+# PM_R
+PM_R_TreeSector   <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/PM_R_TreeSector_CLEAN.csv")
+PM_R_BranchSector <- read_csv("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/PM_R_BranchSector_CLEAN.csv")
+PM_R_CanopySector <- read_csv ("C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/Sectors/Clean_sectors/PM_R_CanopySector_CLEAN.csv")
+
+```
+
+## Output data
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+output <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors" 
+output2 <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors/02_pcasector_matrices" 
+output3 <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors/011_drop_flag_var"
+
+```
+
+#  ADD Population Label
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+#  ID
+id_col <- "file_name"
+
+# List sectors per population
+Tree_list <- list(
+  QC_TR = QC_TR_TreeSector,
+  QC_CP = QC_CP_TreeSector,
+  FS_HF = FS_HF_TreeSector,
+  PM_R  = PM_R_TreeSector
+)
+
+Branch_list <- list(
+  QC_TR = QC_TR_BranchSector,
+  QC_CP = QC_CP_BranchSector,
+  FS_HF = FS_HF_BranchSector,
+  PM_R  = PM_R_BranchSector
+)
+
+Canopy_list <- list(
+  QC_TR = QC_TR_CanopySector,
+  QC_CP = QC_CP_CanopySector,
+  FS_HF = FS_HF_CanopySector,
+  PM_R  = PM_R_CanopySector
+)
+
+```
+
+# Correlation Matrix
+
+For each sector and forest stand, Pearson correlation matrices were computed using “corrplot” package (Wei et al. 2024) in R. Variables involved in highly correlated pairs were progressively removed using sector-specific correlation thresholds (|r| ≥ 0.70 for Tree and Canopy; |r| ≥ 0.60 for Branch), chosen to account for differences in metric redundancy among structural domains.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+cor_output_dir <- file.path(output, "01_Correlation_matrices")
+dir.create(cor_output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# List files
+Tree_clean_list   <- list()
+Branch_clean_list <- list()
+Canopy_clean_list <- list()
+Tree_cor_list     <- list()
+Canopy_cor_list   <- list()
+drop_log_all      <- list()
+
+# Core function
+reduce_cor_vars <- function(df,
+                            sector,
+                            pop,
+                            threshold = 0.7,
+                            out_dir   = cor_output_dir) {
+
+  # numeric only
+  df_num <- df %>% select(where(is.numeric))
+
+  # drop zero-variance / all-NA
+  vars_sd <- apply(df_num, 2, sd, na.rm = TRUE)
+  ok_cols <- is.finite(vars_sd) & vars_sd > 0
+  df_num  <- df_num[, ok_cols, drop = FALSE]
+
+  # correlation
+  cor_mat <- cor(df_num, use = "pairwise.complete.obs")
+  cor_mat[is.na(cor_mat)] <- 0
+
+  # save matrix csv
+  cor_df <- as.data.frame(cor_mat) %>% rownames_to_column("Variable")
+  write_csv(cor_df, file.path(out_dir, paste0("COR_", sector, "_", pop, ".csv")))
+
+  # save single matrix png 
+  png(file.path(out_dir, paste0("COR_", sector, "_", pop, ".png")),
+      width = 1600, height = 1400, res = 150)
+
+  corrplot(cor_mat,
+           method      = "color",
+           type        = "lower",
+           addCoef.col = "black",
+           number.cex  = 0.6,
+           tl.cex      = 0.7,
+           tl.col      = "black",
+           mar         = c(0, 0, 0, 0))
+  mtext(paste0(sector, " \u2013 ", pop), side = 3, line = 0.8, font = 1, cex = 1.1)
+  dev.off()
+
+  # iterative dropping
+  to_drop   <- character()
+  drop_info <- tibble()
+  cm        <- cor_mat
+
+  repeat {
+    cor_abs <- abs(cm)
+    diag(cor_abs) <- 0
+    max_cor <- max(cor_abs)
+
+    if (!is.finite(max_cor) || max_cor < threshold || ncol(cm) < 2) break
+
+    pair <- which(cor_abs == max_cor, arr.ind = TRUE)[1, ]
+    i <- pair[1]; j <- pair[2]
+
+    mean_i <- mean(cor_abs[i, ], na.rm = TRUE)
+    mean_j <- mean(cor_abs[j, ], na.rm = TRUE)
+
+    drop_idx <- if (mean_i >= mean_j) i else j
+    keep_idx <- if (drop_idx == i) j else i
+
+    var_drop <- colnames(cm)[drop_idx]
+    var_keep <- colnames(cm)[keep_idx]
+
+    drop_info <- bind_rows(
+      drop_info,
+      tibble(
+        Sector           = sector,
+        Population       = pop,
+        Dropped_var      = var_drop,
+        Paired_with      = var_keep,
+        Max_corr_at_drop = round(max_cor, 3),
+        Signed_corr      = round(cor_mat[var_drop, var_keep], 3),
+        Threshold_used   = threshold
+      )
+    )
+
+    to_drop <- c(to_drop, var_drop)
+    cm <- cm[-drop_idx, -drop_idx, drop = FALSE]
+  }
+
+  keep <- setdiff(colnames(df_num), to_drop)
+
+  list(
+    df_reduced = df_num[, keep, drop = FALSE],
+    dropped    = drop_info,
+    cor_full   = cor_mat
+  )
+}
+
+# Run: TREE
+
+for (pop in names(Tree_list)) {
+
+  df     <- Tree_list[[pop]]
+  id_vec <- df[[id_col]]
+
+  res <- reduce_cor_vars(
+    df        = df,
+    sector    = "Tree",
+    pop       = pop,
+    threshold = 0.7
+  )
+
+  Tree_cor_list[[pop]] <- res$cor_full
+
+  Tree_clean_list[[pop]] <- cbind(
+    file_name = id_vec,
+    res$df_reduced
+  )
+
+  if (nrow(res$dropped) > 0) drop_log_all[[paste0("Tree_", pop)]] <- res$dropped
+}
+
+
+# Run: BRANCH 
+
+for (pop in names(Branch_list)) {
+
+  df     <- Branch_list[[pop]]
+  id_vec <- df[[id_col]]
+
+  res <- reduce_cor_vars(
+    df        = df,
+    sector    = "Branch",
+    pop       = pop,
+    threshold = 0.6
+  )
+
+  Branch_clean_list[[pop]] <- cbind(
+    file_name = id_vec,
+    res$df_reduced
+  )
+
+  if (nrow(res$dropped) > 0) drop_log_all[[paste0("Branch_", pop)]] <- res$dropped
+}
+
+# Run: CANOPY
+
+for (pop in names(Canopy_list)) {
+
+  df     <- Canopy_list[[pop]]
+  id_vec <- df[[id_col]]
+
+  res <- reduce_cor_vars(
+    df        = df,
+    sector    = "Canopy",
+    pop       = pop,
+    threshold = 0.7
+  )
+
+  Canopy_cor_list[[pop]] <- res$cor_full
+
+  Canopy_clean_list[[pop]] <- cbind(
+    file_name = id_vec,
+    res$df_reduced
+  )
+
+  if (nrow(res$dropped) > 0) drop_log_all[[paste0("Canopy_", pop)]] <- res$dropped
+}
+
+
+# Save drop logs (all sectors)
+
+if (length(drop_log_all) > 0) {
+
+  drop_log_df <- bind_rows(drop_log_all, .id = "Sector_Pop") %>%
+    arrange(Sector, Population, desc(Max_corr_at_drop))
+
+  write_csv(drop_log_df, file.path(cor_output_dir, "Drop_log_multicollinearita_all_sectors.csv"))
+  write_csv(drop_log_df, file.path(cor_output_dir, "Dropped_variables_summary.csv"))
+}
+
+# 2x2 GLOBAL PANELS (TREE + CANOPY)
+
+save_corrpanel_2x2 <- function(cor_list,
+                               pops_order  = c("QC_TR","QC_CP","FS_HF","PM_R"),
+                               sector_label = "Tree",
+                               out_file,
+                               res_dpi = 1200) {
+
+  w_in <- 12
+  h_in <- 10
+
+  png(out_file, width = w_in * res_dpi, height = h_in * res_dpi, res = res_dpi)
+
+  op <- par(no.readonly = TRUE)
+  on.exit({par(op); dev.off()}, add = TRUE)
+
+   par(mfrow = c(2, 2),
+      mar = c(2.0, 4.2, 2.6, 2.0),  
+      oma = c(0, 0, 0, 0))
+
+  tags <- letters[seq_along(pops_order)]
+
+  for (k in seq_along(pops_order)) {
+
+    pop <- pops_order[k]
+    cm  <- cor_list[[pop]]
+    if (is.null(cm) || length(cm) == 0) next
+
+    corrplot(cm,
+             method      = "color",
+             type        = "lower",
+             addCoef.col = "black",
+             number.cex  = 0.55,
+             tl.cex      = 0.75,
+             tl.col      = "black",
+             mar         = c(0, 0, 0, 0))
+
+  
+    mtext(paste0(sector_label, " \u2013 ", pop), side = 3, line = 0.9, font = 1, cex = 1.0)
+    usr <- par("usr")
+    text(x = usr[2], y = usr[3], labels = tags[k],
+         adj = c(1, 0), cex = 1.0, font = 1, xpd = NA)
+  }
+}
+
+cor_panel_dir <- cor_output_dir
+
+save_corrpanel_2x2(
+  cor_list      = Tree_cor_list,
+  pops_order    = c("QC_TR","QC_CP","FS_HF","PM_R"),
+  sector_label  = "Tree",
+  out_file      = file.path(cor_panel_dir, "COR_Tree_ALL_2x2.png"),
+  res_dpi       = 1200
+)
+
+save_corrpanel_2x2(
+  cor_list      = Canopy_cor_list,
+  pops_order    = c("QC_TR","QC_CP","FS_HF","PM_R"),
+  sector_label  = "Canopy",
+  out_file      = file.path(cor_panel_dir, "COR_Canopy_ALL_2x2.png"),
+  res_dpi       = 1200
+)
+
+
+```
+
+
+# Correlation Matrix cvs
+
+```{r}
+#   LIST OF KEPT / DROPPED VARIABLES
+
+#  Sector lists 
+sector_lists <- list(
+  Tree   = Tree_clean_list,
+  Branch = Branch_clean_list,
+  Canopy = Canopy_clean_list
+)
+
+# Final containers 
+kept_vars_all    <- list()
+dropped_vars_all <- list()
+
+
+# Extract kept and dropped variables by sector and population ---
+for (sector in names(sector_lists)) {
+
+  cat("\n=== SECTOR:", sector, "===\n")
+  pop_list <- sector_lists[[sector]]
+
+  for (pop in names(pop_list)) {
+
+    cat(" - Population:", pop, "\n")
+    df_clean <- pop_list[[pop]]
+
+    # Numerical variables in the cleaned dataset
+    vars_all <- names(df_clean)[sapply(df_clean, is.numeric)]
+
+    # Variables dropped due to multicollinearity (from log)
+    vars_dropped <- drop_log_df %>%
+      filter(Sector == sector, Population == pop) %>%
+      pull(Dropped_var) %>%
+      unique()
+
+    # Variables retained
+    vars_kept <- setdiff(vars_all, vars_dropped)
+
+    # Store results
+    key <- paste0(sector, "_", pop)
+    kept_vars_all[[key]]    <- vars_kept
+    dropped_vars_all[[key]] <- vars_dropped
+  }
+}
+
+# Data frames ready for CSV export
+kept_df <- tibble(
+  Sector_Population = names(kept_vars_all),
+  Kept_variables    = vapply(
+    kept_vars_all,
+    function(x) paste(x, collapse = "; "),
+    character(1)
+  )
+)
+
+dropped_df <- tibble(
+  Sector_Population = names(dropped_vars_all),
+  Dropped_variables = vapply(
+    dropped_vars_all,
+    function(x) paste(x, collapse = "; "),
+    character(1)
+  )
+)
+
+# --- 5) EXPORT (fix: create output directory before writing files) ---
+dir.create(output3, recursive = TRUE, showWarnings = FALSE)
+
+file_kept    <- file.path(output3, "Kept_variables_by_sector_population.csv")
+file_dropped <- file.path(output3, "Dropped_variables_by_sector_population.csv")
+
+write_csv(kept_df, file_kept)
+write_csv(dropped_df, file_dropped)
+
+cat(
+  "\nFiles successfully exported:\n",
+  "- ", file_kept, "\n",
+  "- ", file_dropped, "\n"
+)
+
+```
+##  PCA PER SECTOR
+
+The resulting variable sets were used in an independent Principal Component Analyses (PCA) performed for each sector in a given forest stand using R (“stats” package). Principal components were retained until at least 60% of cumulative variance was explained; when PC1 alone exceeded this threshold, PC2 was additionally retained to avoid oversimplification of within-sector structural variability. For each forest stand, a sector-level indicators were computed as a variance-weighted linear combination of the retained component scores 
+
+```{r}
+
+run_sector_pca <- function(clean_list,
+                           sector,               
+                           id_col = "file_name",
+                           min_var_PC1 = 0.60,
+                           results_dir = "output2",
+                           plot_dir    = "output2") {
+  
+  dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(plot_dir,    recursive = TRUE, showWarnings = FALSE)
+  
+  scores_all <- list()
+  var_all    <- list()
+  load_all   <- list()
+  
+  for (pop in names(clean_list)) {
+    
+    df <- clean_list[[pop]]
+    
+    # 1. Numerical vars
+    num <- df %>% select(where(is.numeric))
+    
+    # 2. Replace Inf/-Inf → NA
+    num[!is.finite(as.matrix(num))] <- NA
+    
+    # 3. Remove variables with zero variance
+    sd_vec <- apply(num, 2, sd, na.rm = TRUE)
+    num <- num[, sd_vec > 0, drop = FALSE]
+    
+    if (ncol(num) < 2) {
+      warning("Popolamento ", pop, ": less then two var.")
+      next
+    }
+    
+    # 4. Remove rows with NA/NaN/Inf → only complete cases
+    good_rows <- complete.cases(num)
+    
+    if (sum(good_rows) < 2) {
+      warning("Popolamento ", pop, ": less then two var.")
+      next
+    }
+    
+    num_clean <- num[good_rows, , drop = FALSE]
+    id_vec    <- df[[id_col]][good_rows]
+    
+    # 5. PCA
+    pca <- prcomp(num_clean, center = TRUE, scale. = TRUE)
+    
+    var_expl <- (pca$sdev^2) / sum(pca$sdev^2)
+    cum_var  <- cumsum(var_expl)
+    
+    keep_PC2 <- var_expl[1] < min_var_PC1 && length(var_expl) >= 2
+    
+    # 6. Scores
+    score_df <- as.data.frame(pca$x)
+    colnames(score_df) <- paste0(sector, "_PC", seq_len(ncol(score_df)))
+    
+    keep_cols <- paste0(sector, "_PC1")
+    if (keep_PC2) keep_cols <- c(keep_cols, paste0(sector, "_PC2"))
+    
+    score_df <- score_df[, keep_cols, drop = FALSE]
+    score_df[[id_col]] <- id_vec
+    score_df$Pop <- pop
+    scores_all[[pop]] <- score_df
+    
+    # 7. Variance explained
+    var_df <- tibble(
+      Pop        = pop,
+      Component  = paste0("PC", seq_along(var_expl)),
+      VarExpl    = var_expl,
+      CumVarExpl = cum_var
+    )
+    var_all[[pop]] <- var_df
+    
+    # 8. Loadings
+    load_df <- as.data.frame(pca$rotation)
+    load_df$Variable <- rownames(load_df)
+    rownames(load_df) <- NULL
+    load_df <- load_df %>% relocate(Variable)
+    load_df$Pop <- pop
+    load_all[[pop]] <- load_df
+    
+    # 9. Scree plot
+
+var_df$Component <- factor(
+  var_df$Component,
+  levels = paste0("PC", seq_len(nrow(var_df)))  # ordina PC1, PC2, PC3, ...
+)
+
+scree <- ggplot(var_df, aes(x = Component, y = VarExpl)) +
+  geom_col(fill = "grey40") +
+  geom_line(aes(group = 1)) +
+  geom_point(size = 2) +
+  theme_minimal(base_size = 14) + 
+  theme(
+    panel.grid.major = element_line(color = "grey85"),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = paste0(sector, " - ", pop, " - Scree Plot"),
+    x = "Component",
+    y = "Variance Explained"
+  )
+
+ggsave(
+  filename = file.path(plot_dir, paste0("Scree_", sector, "_", pop, ".png")),
+  plot = scree,
+  width = 7, height = 5, dpi = 300
+)
+
+    # 10. Score plot PC1 vs PC2
+    if (ncol(pca$x) >= 2) {
+      sp <- as.data.frame(pca$x)
+      colnames(sp)[1:2] <- c("PC1", "PC2")
+      sp[[id_col]] <- id_vec
+      
+      g <- ggplot(sp, aes(PC1, PC2)) +
+        geom_point(alpha = 0.7) +
+        labs(title = paste0(sector, " - ", pop, " - Scores"),
+             x = "PC1", y = "PC2")
+      
+      ggsave(file.path(plot_dir, paste0("Scores_", sector, "_", pop, ".png")),
+             g, width = 6, height = 4, dpi = 300)
+    }
+  }
+  
+  list(
+    scores   = bind_rows(scores_all),
+    variance = bind_rows(var_all),
+    loadings = bind_rows(load_all)
+  )
+}
+
+## PCA per Sector
+
+res_tree <- run_sector_pca(
+  clean_list  = Tree_clean_list,
+  sector      = "Tree",
+  id_col      = "file_name",
+  min_var_PC1 = 0.60,
+  results_dir = "output2",
+  plot_dir    = "output2"
+)
+
+res_branch <- run_sector_pca(
+  clean_list  = Branch_clean_list,
+  sector      = "Branch",
+  id_col      = "file_name",
+  min_var_PC1 = 0.60,
+  results_dir = "output2",
+  plot_dir    = "output2"
+)
+
+res_canopy <- run_sector_pca(
+  clean_list  = Canopy_clean_list,
+  sector      = "Canopy",
+  id_col      = "file_name",
+  min_var_PC1 = 0.60,
+  results_dir = "output2",
+  plot_dir    = "output2"
+)
+
+```
+
+
+```{r}
+# ============================================================
+# 2x2 BIPLOTS (Tree / Branch / Canopy) - 1200 dpi
+# - 4 pannelli (QC_TR, QC_CP, FS_HF, PM_R) con lettere a–d
+# - ellisse 95%
+# - etichette variabili GRANDI e senza linee di collegamento
+# - pannelli stessa dimensione (scale assi possono differire)
+# ============================================================
+
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(patchwork)
+
+# ---------------------------
+# 0) Impostazioni
+# ---------------------------
+pops_order <- c("QC_TR","QC_CP","FS_HF","PM_R")
+
+out_dir <- "C:/Users/rosse/OneDrive/Desktop/Lidar structure/Stat/Results/PCA_Sectors/03_biplots_1200dpi"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+# ---------------------------
+# 1) PCA builder (stessa logica pulizia)
+# ---------------------------
+build_pca_for_biplot <- function(df, id_col = "file_name") {
+
+  num <- df %>% dplyr::select(where(is.numeric))
+  num[!is.finite(as.matrix(num))] <- NA
+
+  sd_vec <- apply(num, 2, sd, na.rm = TRUE)
+  num <- num[, sd_vec > 0, drop = FALSE]
+
+  good_rows <- complete.cases(num)
+  num_clean <- num[good_rows, , drop = FALSE]
+
+  if (ncol(num_clean) < 2 || nrow(num_clean) < 3) return(NULL)
+
+  pca <- prcomp(num_clean, center = TRUE, scale. = TRUE)
+  var_expl <- (pca$sdev^2) / sum(pca$sdev^2)
+
+  scores <- as.data.frame(pca$x[, 1:2, drop = FALSE])
+  colnames(scores) <- c("PC1", "PC2")
+
+  load <- as.data.frame(pca$rotation[, 1:2, drop = FALSE])
+  colnames(load) <- c("PC1", "PC2")
+  load$Variable <- rownames(load)
+  rownames(load) <- NULL
+
+  list(scores = scores, loadings = load, var = var_expl[1:2])
+}
+
+# ---------------------------
+# 2) Singolo biplot (ggplot)
+#    - NO linee verso le label: segment.color = NA
+# ---------------------------
+make_biplot_one <- function(clean_list, pop, sector_label, tag_letter) {
+
+  df <- clean_list[[pop]]
+  if (is.null(df)) return(NULL)
+
+  pca_obj <- build_pca_for_biplot(df)
+  if (is.null(pca_obj)) return(NULL)
+
+  sc <- pca_obj$scores
+  ld <- pca_obj$loadings
+  v  <- pca_obj$var
+
+  # scala frecce: proporziona ai range degli scores
+  r_x <- diff(range(sc$PC1, na.rm = TRUE))
+  r_y <- diff(range(sc$PC2, na.rm = TRUE))
+  arrow_scale <- 0.30 * min(r_x, r_y)
+
+  ld2 <- ld %>%
+    mutate(PC1s = PC1 * arrow_scale,
+           PC2s = PC2 * arrow_scale)
+
+  # percentuali varianza
+  pc1_lab <- paste0("PC1 (", round(100 * v[1], 1), "%)")
+  pc2_lab <- paste0("PC2 (", round(100 * v[2], 1), "%)")
+
+  ggplot(sc, aes(PC1, PC2)) +
+    geom_point(size = 2.2, alpha = 0.75, colour = "grey45") +
+
+    # Ellisse 95% (score-space)
+    stat_ellipse(level = 0.95, linetype = "dashed", linewidth = 0.7, colour = "black") +
+
+    # frecce loadings
+    geom_segment(
+      data = ld2,
+      aes(x = 0, y = 0, xend = PC1s, yend = PC2s),
+      inherit.aes = FALSE,
+      linewidth = 0.6,
+      colour = "black",
+      arrow = arrow(length = unit(0.18, "cm"))
+    ) +
+
+    # label variabili GRANDI, senza segmenti (no linee)
+    geom_text_repel(
+      data = ld2,
+      aes(x = PC1s, y = PC2s, label = Variable),
+      inherit.aes = FALSE,
+      size = 4.6,                 # <-- più grande
+      fontface = "plain",
+      colour = "black",
+      segment.color = NA,         # <-- elimina le linee di collegamento
+      max.overlaps = Inf,
+      box.padding = 0.25,
+      point.padding = 0.15
+    ) +
+
+    labs(
+      title = paste0(sector_label, " sector — ", pop),
+      x = pc1_lab, y = pc2_lab
+    ) +
+
+    # lettera a–d in basso a destra (dentro pannello)
+    annotate("text", x = Inf, y = -Inf, label = tag_letter,
+             hjust = 1.1, vjust = -0.7, size = 6) +
+
+    scale_x_continuous(expand = expansion(mult = 0.18)) +
+    scale_y_continuous(expand = expansion(mult = 0.18)) +
+
+    coord_cartesian(clip = "off") +
+    theme_classic(base_size = 15) +
+    theme(
+      plot.title = element_text(size = 16, face = "plain"),
+      axis.title = element_text(size = 15),
+      axis.text  = element_text(size = 12),
+      plot.margin = margin(10, 16, 10, 10)
+    )
+}
+
+# ---------------------------
+# 3) Panel 2x2 + export 1200 dpi
+# ---------------------------
+save_biplot_panel_2x2 <- function(clean_list, sector_label, out_file,
+                                  pops_order = c("QC_TR","QC_CP","FS_HF","PM_R"),
+                                  dpi = 1200) {
+
+  tags <- letters[seq_along(pops_order)]
+
+  plist <- vector("list", length(pops_order))
+  for (k in seq_along(pops_order)) {
+    pop <- pops_order[k]
+    plist[[k]] <- make_biplot_one(clean_list, pop, sector_label, tags[k])
+  }
+
+  # patchwork: pannelli stessa dimensione, scale assi libere
+  panel <- (plist[[1]] | plist[[2]]) / (plist[[3]] | plist[[4]])
+
+  ggsave(
+    filename = out_file,
+    plot = panel,
+    width = 12, height = 10, units = "in",
+    dpi = dpi, bg = "white"
+  )
+}
+
+# ---------------------------
+# 4) Esegui: TREE / BRANCH / CANOPY
+# ---------------------------
+save_biplot_panel_2x2(Tree_clean_list,   "Tree",
+                      file.path(out_dir, "Biplot_Tree_ALL_2x2_1200dpi.png"),
+                      pops_order = pops_order, dpi = 1200)
+
+save_biplot_panel_2x2(Branch_clean_list, "Branch",
+                      file.path(out_dir, "Biplot_Branch_ALL_2x2_1200dpi.png"),
+                      pops_order = pops_order, dpi = 1200)
+
+save_biplot_panel_2x2(Canopy_clean_list, "Canopy",
+                      file.path(out_dir, "Biplot_Canopy_ALL_2x2_1200dpi.png"),
+                      pops_order = pops_order, dpi = 1200)
+
+```
+
+
+
+
+
+```{r}
+
+# -------------------------------
+# REMOVE FILE EXTENSION (.txt, .mat, .ply, ecc.)
+# -------------------------------
+
+remove_ext <- function(x) gsub("\\.[^.]+$", "", x)
+
+res_tree$scores$file_name   <- remove_ext(res_tree$scores$file_name)
+res_branch$scores$file_name <- remove_ext(res_branch$scores$file_name)
+res_canopy$scores$file_name <- remove_ext(res_canopy$scores$file_name)
+
+
+library(dplyr)
+
+tree_scores <- res_tree$scores %>%
+  select(file_name, Pop, starts_with("Tree_PC"))
+
+branch_scores <- res_branch$scores %>%
+  select(file_name, Pop, starts_with("Branch_PC"))
+
+canopy_scores <- res_canopy$scores %>%
+  select(file_name, Pop, starts_with("Canopy_PC"))
+
+# uniamo per file_name + Pop (albero e popolamento)
+sector_scores <- tree_scores %>%
+  full_join(branch_scores, by = c("file_name", "Pop")) %>%
+  full_join(canopy_scores, by = c("file_name", "Pop"))
+
+# controlliamo
+dim(sector_scores)
+head(sector_scores)
+
+
+sector_complete <- sector_scores %>%
+  filter(
+    !is.na(Tree_PC1),
+    !is.na(Branch_PC1),
+    !is.na(Canopy_PC1)
+  )
+
+```
+
+
+```{r}
+make_sector_indicator <- function(res, prefix) {
+  scores_df <- res$scores      # contiene file_name, Pop, Tree_PC1, Tree_PC2, ...
+  var_df    <- res$variance    # contiene Pop, Component, VarExpl
+  
+  out_list <- list()
+  
+  for (pp in unique(scores_df$Pop)) {
+    
+    S_pop <- scores_df %>% 
+      dplyr::filter(Pop == pp)
+    
+    # colonne di PC per questo settore (es. "Tree_PC1","Tree_PC2")
+    pc_cols <- grep(paste0("^", prefix), names(S_pop), value = TRUE)
+    
+    if (length(pc_cols) == 0) next
+    
+    pcs <- as.matrix(S_pop[, pc_cols, drop = FALSE])
+    m_s <- ncol(pcs)
+    
+    # prendo i VarExpl per questo popolamento e per quelle PC
+    comp_names <- paste0("PC", seq_len(m_s))
+    
+    v_pop <- var_df %>% 
+      dplyr::filter(Pop == pp, Component %in% comp_names) %>%
+      dplyr::arrange(Component) %>%
+      dplyr::pull(VarExpl)
+    
+    # se qualcosa va storto, salto
+    if (length(v_pop) != m_s) next
+    
+    w <- v_pop / sum(v_pop)      # pesi normalizzati
+    
+    indicator <- as.numeric(pcs %*% w)
+    
+    # nome del punteggio di settore (TreeScore, BranchScore, CanopyScore)
+    sector_name <- gsub("_PC$", "", prefix)  # "Tree_PC" -> "Tree"
+    score_name  <- paste0(sector_name, "Score")
+    
+    S_pop[[score_name]] <- indicator
+    
+    out_list[[pp]] <- S_pop
+  }
+  
+  dplyr::bind_rows(out_list)
+}
+
+
+```
+
+```{r}
+Tree_ind   <- make_sector_indicator(res_tree,   "Tree_PC")
+Branch_ind <- make_sector_indicator(res_branch, "Branch_PC")
+Canopy_ind <- make_sector_indicator(res_canopy, "Canopy_PC")
+
+head(Tree_ind)
+head(Branch_ind)
+head(Canopy_ind)
+
+
+
+```
+
+```{r}
+tree_s   <- Tree_ind   %>% select(file_name, Pop, TreeScore)
+branch_s <- Branch_ind %>% select(file_name, Pop, BranchScore)
+canopy_s <- Canopy_ind %>% select(file_name, Pop, CanopyScore)
+
+sector_scores2 <- tree_s %>%
+  full_join(branch_s, by = c("file_name","Pop")) %>%
+  full_join(canopy_s, by = c("file_name","Pop"))
+
+# tieni solo gli alberi con TUTTI e tre i punteggi di settore
+sector_complete2 <- sector_scores2 %>%
+  filter(
+    !is.na(TreeScore),
+    !is.na(BranchScore),
+    !is.na(CanopyScore)
+  )
+
+```
+
+```{r}
+sector_z <- sector_complete2 %>%
+  group_by(Pop) %>%
+  mutate(
+    ZTree   = as.numeric(scale(TreeScore)),
+    ZBranch = as.numeric(scale(BranchScore)),
+    ZCanopy = as.numeric(scale(CanopyScore))
+  ) %>%
+  ungroup()
+
+head(sector_z)
+
+```
+
+# Integrative PCA
+
+	The modified structural heterogeneity index (mSHI-TLS) 
+The three standardised sector indicators were combined through an integrative PCA performed independently for each forest stand. This integrative PCA was conducted exclusively to the three variance-balanced and mutually orthogonal sector-level scores. For each tree i, the modified TLS-based Structural Heterogeneity Index (mSHI-TLS) was defined as the score on the first principal component of the integrative PCA.
+The first integrative component was retained when explaining more than 60% of the total variance, and its orientation was constrained so that the sum of loadings was positive, ensuring that higher mSHI-TLS values consistently represented greater whole-tree structural heterogeneity.
+
+At the stand level, the median of the tree-level mSHI-TLS distribution was used as a robust descriptor of central structural heterogeneity, while the interquartile range (IQR) was computed as a complementary measure of within-stand structural variability. Together, the median and IQR position each stand in a bivariate space describing both its central structural heterogeneity and its internal heterogeneity. The mSHI-TLS is a dimensionless, continuous index, with values centred around zero; higher values indicate greater whole-tree structural heterogeneity. 
+
+```{r}
+run_integrative_pca <- function(df, id_col = "file_name") {
+  
+  pops <- unique(df$Pop)
+  
+  scores_list <- list()
+  var_list    <- list()
+  load_list   <- list()
+  
+  for (pp in pops) {
+    
+    sub <- df %>% filter(Pop == pp)
+    
+    X <- sub %>%
+      select(ZTree, ZBranch, ZCanopy) %>%
+      as.matrix()
+    
+    if (nrow(X) < 2) next
+    
+    # PCA sulle 3 variabili standardizzate
+    pca <- prcomp(X, center = TRUE, scale. = FALSE)
+    
+    var_expl <- (pca$sdev^2) / sum(pca$sdev^2)
+    cum_var  <- cumsum(var_expl)
+    
+    # Loadings PC1
+    load1 <- pca$rotation[, 1]
+    
+    # Orientamento (PC1 sempre positiva con complessità crescente)
+    if (sum(load1, na.rm = TRUE) < 0) {
+      load1      <- -load1
+      pca$x[, 1] <- -pca$x[, 1]
+    }
+    
+    # ----- SCORE INTEGRATIVO -----
+    score_df <- data.frame(
+      file_name      = sub[[id_col]],
+      Pop            = pp,
+      Integrated_PC1 = pca$x[, 1]
+    )
+    
+    scores_list[[pp]] <- score_df
+    
+    # ----- VARIANZA SPIEGATA -----
+    var_df <- tibble(
+      Pop       = pp,
+      Component = paste0("PC", seq_along(var_expl)),
+      VarExpl   = var_expl,
+      CumVar    = cum_var
+    )
+    var_list[[pp]] <- var_df
+    
+    # ----- LOADINGS -----
+    load_df <- tibble(
+      Pop         = pp,
+      Variable    = c("ZTree", "ZBranch", "ZCanopy"),
+      Loading_PC1 = as.numeric(load1)
+    )
+    load_list[[pp]] <- load_df
+  }
+  
+  list(
+    scores   = bind_rows(scores_list),
+    variance = bind_rows(var_list),
+    loadings = bind_rows(load_list)
+  )
+}
+mshi_pca <- run_integrative_pca(sector_z)
+```
+
+```{r}
+sector_mshi <- sector_z %>%
+  left_join(mshi_pca$scores, by = c("file_name", "Pop")) %>%
+  rename(mSHI_TLS = Integrated_PC1)
+
+dim(sector_mshi)
+head(sector_mshi)
+
+write_csv(sector_mshi, file.path(output, "mSHI_TLS_trees.csv"))
+
+```
+
+```{r}
+mshi_pop_median <- sector_mshi %>%
+  group_by(Pop) %>%
+  summarise(
+    median_mSHI = median(mSHI_TLS, na.rm = TRUE),
+    IQR_mSHI    = IQR(mSHI_TLS, na.rm = TRUE)
+  )
+
+mshi_pop_median
+write_csv(mshi_pop_median, file.path(output, "mSHI_TLS_pop.csv"))
+```
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,433 @@
+---
+title: "Validation"
+author: "Rossella Castronuovo"
+date: "2025-12-03"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(ITSMe)
+library(alphashape3d)
+library(dplyr)
+library(readr)
+library(geometry)  
+library(alphashape3d)
+library(purrr)
+library(tibble)
+library(stringr)
+
+
+```
+
+# Input files
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Pointcloud data
+
+Qc_Cp_files <- list.files("E:/DELL/Lidar structure index/Stat/QC_CP/pointcloud", 
+               pattern = "\\.txt$", 
+               full.names = TRUE)
+
+Qc_Tr_files <- list.files("E:/DELL/Lidar structure index/Stat/QC_TR/pointcloud", 
+               pattern = "\\.txt$", 
+               full.names = TRUE)
+
+Pm_R_files <- list.files("E:/DELL/Lidar structure index/Stat/PM_R/pointcloud", 
+              pattern = "\\.txt$", 
+              full.names = TRUE)
+
+Fs_Hf_files <- list.files("E:/DELL/Lidar structure index/Stat/FS_HF/pointcloud",
+              pattern = "\\.txt$", 
+              full.names = TRUE)
+```
+
+```{r}
+output <- "E:/DELL/Lidar structure index/Stat/Results/Validation" 
+```
+
+```{r}
+
+# ----------------------------------------------------
+# FASE A — Funzione ITSMe: NO alpha-shape dentro il loop
+# ----------------------------------------------------
+process_point_clouds_ITSMe <- function(files, source_label) {
+  
+  results_list <- list()
+  
+  for (file_path in files) {
+    tryCatch({
+      
+      # 1) Leggi point cloud
+      tree_pc <- read_tree_pc(path = file_path)   # data.frame con X,Y,Z
+      
+      # 2) Altezza albero
+      tree_height <- max(tree_pc$Z, na.rm = TRUE) - min(tree_pc$Z, na.rm = TRUE)
+      
+      # 3) Classificazione CHIOMA ITSMe
+      C_out     <- classify_crown_pc(pc = tree_pc)
+      crown_ins <- C_out$crownpoints     # data.frame con X,Y,Z
+      
+      if (is.null(crown_ins) || nrow(crown_ins) < 10) {
+        results_list[[length(results_list)+1]] <- data.frame(
+          file_name         = basename(file_path),
+          source            = source_label,
+          tree_height       = tree_height,
+          crown_base_height = NA,
+          crown_length      = NA,
+          crown_pa          = NA,
+          crown_width       = NA,
+          cw_cl_ratio       = NA
+        )
+        next
+      }
+      
+      # 4) Crown base height & length
+      crown_base_height <- min(crown_ins$Z, na.rm = TRUE)
+      crown_length      <- max(crown_ins$Z) - crown_base_height
+      
+      # 5) Projected area ITSMe
+      pa_out   <- projected_area_pc(pc = crown_ins)
+      crown_pa <- pa_out$pa
+      
+      # 6) Crown width = diametro del cerchio equivalente
+      crown_width <- 2 * sqrt(crown_pa / pi)
+      
+      # (opzionale) rapporto crown width / crown length
+      cw_cl_ratio <- ifelse(is.finite(crown_length) & crown_length > 0,
+                            crown_width / crown_length,
+                            NA_real_)
+      
+      # ---- Salva risultati base (ITSMe-only) ----
+      results_list[[length(results_list)+1]] <- data.frame(
+        file_name         = basename(file_path),
+        source            = source_label,
+        tree_height       = tree_height,
+        crown_base_height = crown_base_height,
+        crown_length      = crown_length,
+        crown_pa          = crown_pa,
+        crown_width       = crown_width,
+        cw_cl_ratio       = cw_cl_ratio
+      )
+      
+      
+    }, error = function(e) {
+      message("Errore nel file ITSMe: ", basename(file_path), "\n", e)
+    })
+  }
+  
+  bind_rows(results_list)
+}
+
+
+# A) ITSMe — nessun rischio di crash
+#Fs_Hf_base <- process_point_clouds_ITSMe(Fs_Hf_files, "FS_HF")
+#write_csv(Fs_Hf_base, file.path(output, "FS_HF_CrownMetrics.csv"))
+
+#Pm_R_base <- process_point_clouds_ITSMe(Pm_R_files, "Pm_R")
+#write_csv(Pm_R_base, file.path(output, "Pm_R_CrownMetrics.csv"))
+
+#Qc_Cp_base <- process_point_clouds_ITSMe(Qc_Cp_files, "Qc_Cp")
+#write_csv(Qc_Cp_base, file.path(output, "Qc_Cp_CrownMetrics.csv"))
+
+#Qc_Tr_base <- process_point_clouds_ITSMe(Qc_Tr_files, "Qc_Tr")
+#write_csv(Qc_Tr_base, file.path(output, "Qc_Tr_CrownMetrics.csv"))
+
+```
+
+```{r}
+process_alpha_metrics <- function(files, 
+                                  source_label, 
+                                  alpha_val = 0.3) {
+  
+  results_list <- list()
+  
+  for (file_path in files) {
+    message("Processing (alpha): ", file_path)
+    
+    tryCatch({
+      # 1) Leggi point cloud
+      tree_pc <- read_tree_pc(path = file_path)
+      
+      # 2) Classificazione chioma
+      C_out     <- classify_crown_pc(pc = tree_pc)
+      crown_pts <- C_out$crownpoints   # data.frame con X,Y,Z
+      
+      # 3) Controllo minimo punti
+      if (is.null(crown_pts) || nrow(crown_pts) < 4) {
+        warning("Pochi punti di chioma per alpha shape nel file: ", basename(file_path))
+        
+        results_list[[length(results_list) + 1]] <- data.frame(
+          file_name           = basename(file_path),
+          source              = source_label,
+          alpha               = alpha_val,
+          n_points_crown      = ifelse(is.null(crown_pts), 0, nrow(crown_pts)),
+          crown_volume_alpha  = NA_real_,
+          crown_surface_alpha = NA_real_
+        )
+        next
+      }
+      
+      # 4) Matrice XYZ per alpha shape
+      M <- as.matrix(crown_pts[, c("X", "Y", "Z")])
+      
+      # 5) Alpha shape 3D
+      ash <- alphashape3d::ashape3d(M, alpha = alpha_val)
+      
+      # 6) Volume alpha-shape
+      vol <- as.numeric(alphashape3d::volume_ashape3d(ash))
+      
+      # 7) Superficie alpha-shape:
+      #    surfaceNormals restituisce vettori normali con modulo = area del triangolo
+      normals_obj <- alphashape3d::surfaceNormals(ash)
+      normals_mat <- normals_obj$normals          # matrice Nx3
+      tri_areas   <- sqrt(rowSums(normals_mat^2)) # modulo di ogni normale = area
+      surf        <- sum(tri_areas, na.rm = TRUE)
+      
+      # 8) Salva risultati
+      results_list[[length(results_list) + 1]] <- data.frame(
+        file_name           = basename(file_path),
+        source              = source_label,
+        alpha               = alpha_val,
+        n_points_crown      = nrow(crown_pts),
+        crown_volume_alpha  = vol,
+        crown_surface_alpha = surf
+      )
+      
+    }, error = function(e) {
+      message("Errore nel file alpha: ", basename(file_path), "\n", e)
+      
+      results_list[[length(results_list) + 1]] <- data.frame(
+        file_name           = basename(file_path),
+        source              = source_label,
+        alpha               = alpha_val,
+        n_points_crown      = NA_integer_,
+        crown_volume_alpha  = NA_real_,
+        crown_surface_alpha = NA_real_
+      )
+    })
+  }
+  
+  dplyr::bind_rows(results_list)
+}
+
+```
+
+```{r}
+FS_HF_alpha <- process_alpha_metrics(Fs_Hf_files, "FS_HF", alpha_val = 0.3)
+PM_R_alpha  <- process_alpha_metrics(Pm_R_files,  "PM_R",  alpha_val = 0.3)
+QC_TR_alpha <- process_alpha_metrics(Qc_Tr_files, "QC_TR", alpha_val = 0.3)
+QC_CP_alpha <- process_alpha_metrics(Qc_Cp_files, "QC_CP", alpha_val = 0.3)
+
+write_csv(QC_CP_alpha, file.path(output, "QC_CP_alpha_metrics.csv"))
+write_csv(FS_HF_alpha, file.path(output, "FS_HF_alpha_metrics.csv"))
+write_csv(PM_R_alpha,  file.path(output, "PM_R_alpha_metrics.csv"))
+write_csv(QC_TR_alpha, file.path(output, "QC_TR_alpha_metrics.csv"))
+```
+
+```{r}
+
+compute_crown_sinuosity <- function(files, pop_label) {
+  # files     = vettore di path ai .txt
+  # pop_label = etichetta popolamento (es. "QC_TR")
+  
+  out_list <- list()
+  
+  for (fp in files) {
+    message("Crown sinuosity - ", basename(fp))
+    
+    res <- tryCatch({
+      # 1. Leggo point cloud
+      pc <- read_tree_pc(fp)
+      
+      # 2. Estraggo la chioma
+      C_out <- classify_crown_pc(pc = pc)
+      crown <- C_out$crownpoints
+      
+      # 3. Base, tip, lunghezza chioma
+      z_min <- min(crown$Z, na.rm = TRUE)
+      z_max <- max(crown$Z, na.rm = TRUE)
+      cl    <- z_max - z_min
+      
+      if (!is.finite(cl) || cl <= 0) {
+        return(data.frame(
+          file_name       = basename(fp),
+          Pop             = pop_label,
+          crown_sinuosity = NA_real_
+        ))
+      }
+      
+      frac <- 0.20  # 20% basso/alto
+      
+      base_pts <- crown[crown$Z <= z_min + frac * cl, ]
+      tip_pts  <- crown[crown$Z >= z_max - frac * cl, ]
+      
+      base_pt <- c(
+        X = mean(base_pts$X, na.rm = TRUE),
+        Y = mean(base_pts$Y, na.rm = TRUE),
+        Z = mean(base_pts$Z, na.rm = TRUE)
+      )
+      
+      tip_pt <- c(
+        X = mean(tip_pts$X, na.rm = TRUE),
+        Y = mean(tip_pts$Y, na.rm = TRUE),
+        Z = mean(tip_pts$Z, na.rm = TRUE)
+      )
+      
+      axis_vec <- tip_pt - base_pt
+      
+      if (any(!is.finite(axis_vec)) || sum(axis_vec^2) == 0) {
+        return(data.frame(
+          file_name       = basename(fp),
+          Pop             = pop_label,
+          crown_sinuosity = NA_real_
+        ))
+      }
+      
+      # 4. Distanza di OGNI punto di chioma dall’asse ideale
+      #    (distanza punto-linea 3D)
+      M <- as.matrix(crown[, c("X", "Y", "Z")])
+      B <- matrix(base_pt, nrow = nrow(M), ncol = 3, byrow = TRUE)
+      
+      w  <- M - B
+      t  <- rowSums(w * matrix(axis_vec, nrow = nrow(M), ncol = 3, byrow = TRUE)) /
+        sum(axis_vec * axis_vec)
+      P  <- B + t * matrix(axis_vec, nrow = nrow(M), ncol = 3, byrow = TRUE)
+      d  <- sqrt(rowSums((M - P)^2))
+      
+      d  <- d[is.finite(d)]
+      
+      sinu <- if (length(d) == 0) NA_real_ else mean(d)
+      
+      data.frame(
+        file_name       = basename(fp),
+        Pop             = pop_label,
+        crown_sinuosity = sinu
+      )
+      
+    }, error = function(e) {
+      message("Errore su ", basename(fp), ": ", e$message)
+      data.frame(
+        file_name       = basename(fp),
+        Pop             = pop_label,
+        crown_sinuosity = NA_real_
+      )
+    })
+    
+    out_list[[length(out_list) + 1]] <- res
+  }
+  
+  dplyr::bind_rows(out_list)
+}
+
+# FS_HF_sinu <- compute_crown_sinuosity(Fs_Hf_files, pop_label = "FS_HF")
+# write_csv(FS_HF_sinu, file.path(output, "FS_HF_crown_sinuosity.csv"))
+
+# QC_TR_sinu <- compute_crown_sinuosity(Qc_Tr_files, pop_label = "QC_TR")
+# write_csv(QC_TR_sinu, file.path(output, "QC_TR_crown_sinuosity.csv"))
+
+QC_CP_sinu <- compute_crown_sinuosity(Qc_Cp_files, pop_label = "QC_TR")
+# write_csv(QC_CP_sinu, file.path(output, "QC_CP_crown_sinuosity.csv"))
+
+PM_R_sinu  <- compute_crown_sinuosity(Pm_R_files,  pop_label = "PM_R")
+# write_csv(PM_R_sinu,  file.path(output, "PM_R_crown_sinuosity.csv"))
+```
+
+```{r}
+library(dplyr)
+library(readr)
+
+compute_crown_displacement <- function(files, pop_label) {
+  
+  out_list <- vector("list", length(files))
+  
+  for (i in seq_along(files)) {
+    fp <- files[i]
+    message("Crown displacement - ", basename(fp))
+    
+    res <- tryCatch({
+      pc <- read_tree_pc(path = fp)
+      
+      C_out <- classify_crown_pc(pc = pc)
+      crown <- C_out$crownpoints
+      
+      # Se la chioma non c'è o è troppo scarsa → NA
+      if (is.null(crown) || nrow(crown) < 10) {
+        return(data.frame(
+          file_name          = basename(fp),
+          Pop                = pop_label,
+          crown_displacement = NA_real_
+        ))
+      }
+      
+      z_min <- min(crown$Z, na.rm = TRUE)
+      z_max <- max(crown$Z, na.rm = TRUE)
+      cl    <- z_max - z_min
+      
+      if (!is.finite(cl) || cl <= 0) {
+        return(data.frame(
+          file_name          = basename(fp),
+          Pop                = pop_label,
+          crown_displacement = NA_real_
+        ))
+      }
+      
+      frac <- 0.20  # 20% basso / alto
+      
+      base_pts <- crown[crown$Z <= z_min + frac * cl, ]
+      tip_pts  <- crown[crown$Z >= z_max - frac * cl, ]
+      
+      base_xy <- c(
+        X = mean(base_pts$X, na.rm = TRUE),
+        Y = mean(base_pts$Y, na.rm = TRUE)
+      )
+      
+      tip_xy <- c(
+        X = mean(tip_pts$X, na.rm = TRUE),
+        Y = mean(tip_pts$Y, na.rm = TRUE)
+      )
+      
+      if (any(!is.finite(c(base_xy, tip_xy)))) {
+        crown_disp <- NA_real_
+      } else {
+        crown_disp <- sqrt((tip_xy["X"] - base_xy["X"])^2 +
+                           (tip_xy["Y"] - base_xy["Y"])^2)
+      }
+      
+      data.frame(
+        file_name          = basename(fp),
+        Pop                = pop_label,
+        crown_displacement = crown_disp
+      )
+      
+    }, error = function(e) {
+      message("Errore su ", basename(fp), ": ", e$message)
+      data.frame(
+        file_name          = basename(fp),
+        Pop                = pop_label,
+        crown_displacement = NA_real_
+      )
+    })
+    
+    out_list[[i]] <- res
+  }
+  
+  bind_rows(out_list)
+}
+
+FS_HF_dis <- compute_crown_displacement(Fs_Hf_files, pop_label = "FS_HF")
+write_csv(FS_HF_dis, file.path(output, "FS_HF_dis.csv"))
+
+QC_TR_dis <- compute_crown_displacement(Qc_Tr_files, pop_label = "QC_TR")
+write_csv(QC_TR_dis, file.path(output, "QC_TR_dis.csv"))
+
+QC_CP_dis <- compute_crown_displacement(Qc_Cp_files, pop_label = "QC_TR")
+write_csv(QC_CP_dis, file.path(output, "QC_CP_dis.csv"))
+
+PM_R_dis  <- compute_crown_displacement(Pm_R_files,  pop_label = "PM_R")
+write_csv(PM_R_dis,  file.path(output, "PM_R_dis.csv"))
+```
+
+
+
